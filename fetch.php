@@ -3,43 +3,46 @@
 $sourceApi = "https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json";
 $file = "data.json";
 
-$response = json_decode(file_get_contents($sourceApi), true);
-$list = $response['data']['list'] ?? [];
+$json = file_get_contents($sourceApi);
+if ($json === false) exit("API ERROR");
 
-// existing data
-$stored = file_exists($file)
-    ? json_decode(file_get_contents($file), true)
-    : [];
+$res = json_decode($json, true);
+$list = $res['data']['list'] ?? [];
 
-// existing issueNumber map
-$exists = [];
-foreach ($stored as $row) {
-    $exists[$row['issueNumber']] = true;
+// load safely
+$stored = [];
+if (file_exists($file)) {
+    $old = json_decode(file_get_contents($file), true);
+    if (is_array($old)) {
+        $stored = $old;
+    }
 }
 
-// save only new issueNumber
-foreach ($list as $item) {
-    $issue = $item['issueNumber'];
-
-    if (isset($exists[$issue])) {
-        continue; // duplicate skip
+// issue map
+$map = [];
+foreach ($stored as $row) {
+    if (isset($row['issueNumber'])) {
+        $map[$row['issueNumber']] = true;
     }
+}
+
+foreach ($list as $item) {
+    if (!isset($item['issueNumber'], $item['number'])) continue;
+
+    if (isset($map[$item['issueNumber']])) continue;
 
     $stored[] = [
-        "issueNumber" => $issue,
-        "number" => $item['number'],
-        "time" => time()
+        "issueNumber"=>$item['issueNumber'],
+        "number"=>$item['number'],
+        "time"=>time()
     ];
 
-    $exists[$issue] = true;
+    $map[$item['issueNumber']] = true;
 }
 
-// max 10,000 records
 if (count($stored) > 10000) {
     $stored = array_slice($stored, -10000);
 }
 
-// save file
 file_put_contents($file, json_encode($stored));
-
 echo "OK";
