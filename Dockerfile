@@ -1,27 +1,21 @@
-# Base image
 FROM python:3.11-slim
 
-# Environment clean & fast
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Working directory
 WORKDIR /app
 
-# System deps (optional but safe)
+# system deps
 RUN apt-get update && apt-get install -y \
-    unzip \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy zip
-COPY FilesStoreBot.zip /app/
+# install python deps first (cache friendly)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Extract project
-RUN unzip FilesStoreBot.zip && rm FilesStoreBot.zip
+# copy rest of files
+COPY . .
 
-# Install requirements if exists
-RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
-
-# Auto start (NO COMMAND NEEDED FROM USER)
-CMD ["python", "main.py"]
+# auto start bot (NO manual command)
+CMD ["python", "bot.py"]
