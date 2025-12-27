@@ -27,26 +27,34 @@ UPDATE_CHANNEL = os.getenv("UPDATE_CHANNEL")
 
 ADMINS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x]
 
-# ---------------- FLASK ----------------
+# ---------------- FLASK (Render ke liye zaruri) ----------------
 app_flask = Flask(__name__)
 
 @app_flask.route("/")
 def home():
-    return "Bot Alive", 200
+    return "Bot Alive ✅", 200
 
 def run_flask():
-    port = int(os.getenv("PORT", 8080))
-    app_flask.run("0.0.0.0", port)
+    port = int(os.getenv("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=port)
 
-# ---------------- FIREBASE (SECURE INIT) ----------------
+# ---------------- FIREBASE INIT (FIXED & SAFE) ----------------
 firebase_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+
 if not firebase_json:
-    raise RuntimeError("FIREBASE_SERVICE_ACCOUNT env missing")
+    raise RuntimeError("❌ FIREBASE_SERVICE_ACCOUNT env missing")
 
-cred = credentials.Certificate(json.loads(firebase_json))
-firebase_admin.initialize_app(cred)
+try:
+    firebase_dict = json.loads(firebase_json)
+except json.JSONDecodeError as e:
+    raise RuntimeError("❌ Firebase JSON invalid. One-line JSON hona chahiye") from e
+
+cred = credentials.Certificate(firebase_dict)
+
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(cred)
+
 db = firestore.client()
-
 files_col = db.collection("files")
 settings_col = db.collection("settings")
 
@@ -75,6 +83,7 @@ def get_mode():
     doc = settings_col.document("bot_mode").get()
     if doc.exists:
         return doc.to_dict().get("mode", "public")
+
     settings_col.document("bot_mode").set({"mode": "public"})
     return "public"
 
@@ -93,7 +102,11 @@ async def start_handler(client, msg):
 
         doc = files_col.document(code).get()
         if doc.exists:
-            await client.copy_message(msg.chat.id, LOG_CHANNEL, doc.to_dict()["message_id"])
+            await client.copy_message(
+                msg.chat.id,
+                LOG_CHANNEL,
+                doc.to_dict()["message_id"]
+            )
         else:
             await msg.reply("❌ File not found")
     else:
@@ -109,7 +122,9 @@ async def upload(client, msg):
     fwd = await msg.forward(LOG_CHANNEL)
 
     code = gen_code()
-    files_col.document(code).set({"message_id": fwd.id})
+    files_col.document(code).set({
+        "message_id": fwd.id
+    })
 
     me = await client.get_me()
     link = f"https://t.me/{me.username}?start={code}"
@@ -121,29 +136,38 @@ async def upload(client, msg):
 async def settings(client, msg):
     if msg.from_user.id not in ADMINS:
         return
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🌍 Public", callback_data="mode_public")],
         [InlineKeyboardButton("🔒 Private", callback_data="mode_private")]
     ])
-    await msg.reply(f"⚙ Mode: {get_mode()}", reply_markup=kb)
+
+    await msg.reply(f"⚙ Current Mode: {get_mode()}", reply_markup=kb)
 
 @bot.on_callback_query(filters.regex("^mode_"))
 async def set_mode(client, cq):
     if cq.from_user.id not in ADMINS:
         return
+
     mode = cq.data.split("_")[1]
     settings_col.document("bot_mode").set({"mode": mode})
+
     await cq.answer(f"Mode set to {mode.upper()}", show_alert=True)
 
 @bot.on_callback_query(filters.regex("^check_"))
 async def check_join(client, cq):
     code = cq.data.split("_")[1]
+
     if not await is_member(client, cq.from_user.id):
-        return await cq.answer("❌ Join first", show_alert=True)
+        return await cq.answer("❌ Pehle join karo", show_alert=True)
 
     doc = files_col.document(code).get()
     if doc.exists:
-        await client.copy_message(cq.from_user.id, LOG_CHANNEL, doc.to_dict()["message_id"])
+        await client.copy_message(
+            cq.from_user.id,
+            LOG_CHANNEL,
+            doc.to_dict()["message_id"]
+        )
         await cq.message.delete()
     else:
         await cq.answer("❌ File not found", show_alert=True)
