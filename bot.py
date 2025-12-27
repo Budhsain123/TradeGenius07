@@ -11,7 +11,7 @@ from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, db
 
 # ---------------- BASIC ----------------
 load_dotenv()
@@ -26,29 +26,33 @@ UPDATE_CHANNEL = os.getenv("UPDATE_CHANNEL")
 
 ADMINS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x]
 
-# ---------------- FLASK (Render ke liye REQUIRED) ----------------
-app_flask = Flask(__name__)
+# ---------------- FLASK (Render ke liye mandatory) ----------------
+flask_app = Flask(__name__)
 
-@app_flask.route("/")
+@flask_app.route("/")
 def home():
     return "Bot Alive ✅", 200
 
 def run_flask():
     port = int(os.getenv("PORT", 10000))
-    app_flask.run(host="0.0.0.0", port=port)
+    flask_app.run(host="0.0.0.0", port=port)
 
-# ---------------- FIREBASE INIT (FILE METHOD – SAFE) ----------------
+# ---------------- FIREBASE RTDB INIT ----------------
 if not os.path.exists("firebase.json"):
     raise RuntimeError("❌ firebase.json file missing")
 
 cred = credentials.Certificate("firebase.json")
 
 if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
+    firebase_admin.initialize_app(
+        cred,
+        {
+            "databaseURL": "https://colortraderpro-panel-default-rtdb.firebaseio.com"
+        }
+    )
 
-db = firestore.client()
-files_col = db.collection("files")
-settings_col = db.collection("settings")
+files_ref = db.reference("files")
+settings_ref = db.reference("settings")
 
 # ---------------- PYROGRAM ----------------
 bot = Client(
@@ -72,14 +76,13 @@ async def is_member(client, user_id):
         return False
 
 def get_mode():
-    doc = settings_col.document("bot_mode").get()
-    if doc.exists:
-        return doc.to_dict().get("mode", "public")
-
-    settings_col.document("bot_mode").set({"mode": "public"})
+    mode = settings_ref.child("bot_mode").get()
+    if mode:
+        return mode
+    settings_ref.child("bot_mode").set("public")
     return "public"
 
-# ---------------- START ----------------
+# ---------------- START COMMAND ----------------
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, msg):
     if len(msg.command) > 1:
@@ -91,33 +94,33 @@ async def start_handler(client, msg):
                 [InlineKeyboardButton("✅ Joined", callback_data=f"check_{code}")]
             ])
             return await msg.reply(
-                "📢 File lene ke liye pehle channel join karo",
+                "📢 File access ke liye pehle channel join karo",
                 reply_markup=kb
             )
 
-        doc = files_col.document(code).get()
-        if doc.exists:
+        data = files_ref.child(code).get()
+        if data:
             await client.copy_message(
                 msg.chat.id,
                 LOG_CHANNEL,
-                doc.to_dict()["message_id"]
+                data["message_id"]
             )
         else:
             await msg.reply("❌ File not found / expired")
     else:
-        await msg.reply("📁 Koi bhi file bhejo, main link bana dunga")
+        await msg.reply("📁 Koi bhi file bhejo, main uska link bana dunga")
 
 # ---------------- FILE UPLOAD ----------------
 @bot.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
-async def upload(client, msg):
+async def upload_handler(client, msg):
     if get_mode() == "private" and msg.from_user.id not in ADMINS:
-        return await msg.reply("❌ Sirf admins upload kar sakte hain")
+        return await msg.reply("❌ Sirf admins file upload kar sakte hain")
 
     wait = await msg.reply("⏳ Uploading...")
     fwd = await msg.forward(LOG_CHANNEL)
 
     code = gen_code()
-    files_col.document(code).set({
+    files_ref.child(code).set({
         "message_id": fwd.id
     })
 
@@ -131,7 +134,7 @@ async def upload(client, msg):
 
 # ---------------- SETTINGS ----------------
 @bot.on_message(filters.command("settings") & filters.private)
-async def settings(client, msg):
+async def settings_handler(client, msg):
     if msg.from_user.id not in ADMINS:
         return
 
@@ -151,7 +154,7 @@ async def set_mode(client, cq):
         return
 
     mode = cq.data.split("_")[1]
-    settings_col.document("bot_mode").set({"mode": mode})
+    settings_ref.child("bot_mode").set(mode)
 
     await cq.answer(
         f"✅ Mode set to {mode.upper()}",
@@ -168,12 +171,12 @@ async def check_join(client, cq):
             show_alert=True
         )
 
-    doc = files_col.document(code).get()
-    if doc.exists:
+    data = files_ref.child(code).get()
+    if data:
         await client.copy_message(
             cq.from_user.id,
             LOG_CHANNEL,
-            doc.to_dict()["message_id"]
+            data["message_id"]
         )
         await cq.message.delete()
     else:
