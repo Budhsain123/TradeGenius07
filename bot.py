@@ -46,11 +46,11 @@ ADMINS = [int(admin_id.strip()) for admin_id in ADMIN_IDS_STR.split(',') if admi
 # --- Database Setup ---
 try:
 client = MongoClient(
-    MONGO_URI,
-    tls=True,
-    tlsCAFile=certifi.where(),
-    serverSelectionTimeoutMS=30000
-)
+        MONGO_URI,
+        tls=True,
+        tlsCAFile=certifi.where(),
+        serverSelectionTimeoutMS=30000
+    )
     db = client['file_link_bot']
     files_collection = db['files']
     settings_collection = db['settings']
