@@ -1,5 +1,6 @@
-pyrogram
+pyrogram>=2.0.106
 tgcrypto
-pymongo[srv]
+pymongo[srv]>=4.6.0
 python-dotenv
 flask
+certifi
