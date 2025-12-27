@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 import random
 import string
@@ -27,7 +26,7 @@ UPDATE_CHANNEL = os.getenv("UPDATE_CHANNEL")
 
 ADMINS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x]
 
-# ---------------- FLASK (Render ke liye zaruri) ----------------
+# ---------------- FLASK (Render ke liye REQUIRED) ----------------
 app_flask = Flask(__name__)
 
 @app_flask.route("/")
@@ -38,18 +37,11 @@ def run_flask():
     port = int(os.getenv("PORT", 10000))
     app_flask.run(host="0.0.0.0", port=port)
 
-# ---------------- FIREBASE INIT (FIXED & SAFE) ----------------
-firebase_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+# ---------------- FIREBASE INIT (FILE METHOD – SAFE) ----------------
+if not os.path.exists("firebase.json"):
+    raise RuntimeError("❌ firebase.json file missing")
 
-if not firebase_json:
-    raise RuntimeError("❌ FIREBASE_SERVICE_ACCOUNT env missing")
-
-try:
-    firebase_dict = json.loads(firebase_json)
-except json.JSONDecodeError as e:
-    raise RuntimeError("❌ Firebase JSON invalid. One-line JSON hona chahiye") from e
-
-cred = credentials.Certificate(firebase_dict)
+cred = credentials.Certificate("firebase.json")
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
@@ -98,7 +90,10 @@ async def start_handler(client, msg):
                 [InlineKeyboardButton("🔗 Join Channel", url=f"https://t.me/{UPDATE_CHANNEL}")],
                 [InlineKeyboardButton("✅ Joined", callback_data=f"check_{code}")]
             ])
-            return await msg.reply("📢 Pehle channel join karo", reply_markup=kb)
+            return await msg.reply(
+                "📢 File lene ke liye pehle channel join karo",
+                reply_markup=kb
+            )
 
         doc = files_col.document(code).get()
         if doc.exists:
@@ -108,9 +103,9 @@ async def start_handler(client, msg):
                 doc.to_dict()["message_id"]
             )
         else:
-            await msg.reply("❌ File not found")
+            await msg.reply("❌ File not found / expired")
     else:
-        await msg.reply("📁 File bhejo, link pao")
+        await msg.reply("📁 Koi bhi file bhejo, main link bana dunga")
 
 # ---------------- FILE UPLOAD ----------------
 @bot.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
@@ -129,7 +124,10 @@ async def upload(client, msg):
     me = await client.get_me()
     link = f"https://t.me/{me.username}?start={code}"
 
-    await wait.edit_text(f"✅ Link Generated\n\n`{link}`")
+    await wait.edit_text(
+        f"✅ **Link Generated**\n\n`{link}`",
+        disable_web_page_preview=True
+    )
 
 # ---------------- SETTINGS ----------------
 @bot.on_message(filters.command("settings") & filters.private)
@@ -142,7 +140,10 @@ async def settings(client, msg):
         [InlineKeyboardButton("🔒 Private", callback_data="mode_private")]
     ])
 
-    await msg.reply(f"⚙ Current Mode: {get_mode()}", reply_markup=kb)
+    await msg.reply(
+        f"⚙ **Current Mode:** `{get_mode()}`",
+        reply_markup=kb
+    )
 
 @bot.on_callback_query(filters.regex("^mode_"))
 async def set_mode(client, cq):
@@ -152,14 +153,20 @@ async def set_mode(client, cq):
     mode = cq.data.split("_")[1]
     settings_col.document("bot_mode").set({"mode": mode})
 
-    await cq.answer(f"Mode set to {mode.upper()}", show_alert=True)
+    await cq.answer(
+        f"✅ Mode set to {mode.upper()}",
+        show_alert=True
+    )
 
 @bot.on_callback_query(filters.regex("^check_"))
 async def check_join(client, cq):
     code = cq.data.split("_")[1]
 
     if not await is_member(client, cq.from_user.id):
-        return await cq.answer("❌ Pehle join karo", show_alert=True)
+        return await cq.answer(
+            "❌ Pehle channel join karo",
+            show_alert=True
+        )
 
     doc = files_col.document(code).get()
     if doc.exists:
@@ -175,4 +182,5 @@ async def check_join(client, cq):
 # ---------------- RUN ----------------
 if __name__ == "__main__":
     Thread(target=run_flask).start()
+    logging.info("🤖 Bot starting...")
     bot.run()
