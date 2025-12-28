@@ -52,7 +52,7 @@ class Config:
     MINIMUM_WITHDRAWAL = 20
     BONUS_AT_10_REFERRALS = 5
     
-    ADMIN_USER_ID = "6608445090"
+    ADMIN_USER_ID = "1882237415"
     SUPPORT_CHANNEL = "@TradeGenius07_HelpCenter_bot"
     
     LOG_FILE = "bot_logs.txt"
