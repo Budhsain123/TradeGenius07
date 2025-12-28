@@ -1340,7 +1340,6 @@ Example:
             msg = f"""📞 <b>Support</b>
 
 Channel: {Config.SUPPORT_CHANNEL}
-Admin: @AdminUsername
 
 We're here to help!"""
         
@@ -1485,7 +1484,7 @@ You can now request withdrawals."""
                 
                 time.sleep(0.3)
                 
-            except KeyboardInterrupt:
+except KeyboardInterrupt:
                 print("\n🛑 Bot stopped")
                 self.running = False
                 
@@ -1504,4 +1503,21 @@ if __name__ == "__main__":
         print("❌ Configure bot token first!")
     else:
         bot = TradeGeniusBot()
-        bot.run()
+
+        # 🔥 BOT THREAD
+        import threading
+        bot_thread = threading.Thread(target=bot.run)
+        bot_thread.start()
+
+        # 🌐 RENDER ENDPOINT FIX
+        from flask import Flask
+        import os
+
+        app = Flask(__name__)
+
+        @app.route("/")
+        def home():
+            return "✅ Trade Genius Bot is running on Render"
+
+        port = int(os.environ.get("PORT", 8080))
+        app.run(host="0.0.0.0", port=port)
