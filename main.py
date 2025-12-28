@@ -55,7 +55,7 @@ class Config:
     BONUS_AT_10_REFERRALS = 5
     
     # 🔐 ADMIN SETTINGS
-    ADMIN_USER_ID = "1882237415"  # Your Telegram ID
+    ADMIN_USER_ID = "6608445090"  # Your Telegram ID
     SUPPORT_CHANNEL = "@TradeGenius07_HelpCenter_bot"
     
     # Bot Settings
@@ -470,88 +470,152 @@ class TradeGeniusBot:
         self.show_welcome_screen(chat_id, user_id, username, user, args)
     
     def show_verification_screen(self, chat_id, user_id, username):
-        """Show channel verification screen ONLY if channels exist"""
-        channels = self.db.get_channels()
-        
-        if not channels:
-            # No channels, auto verify
-            self.db.mark_user_verified(user_id)
-            self.show_welcome_screen(chat_id, user_id, username, None, [])
-            return
-        
-        msg = """🔐 <b>Channel Verification Required</b>
+    """Show channel verification screen ONLY if channels exist"""
+    channels = self.db.get_channels()
+    
+    if not channels:
+        # No channels, auto verify
+        self.db.mark_user_verified(user_id)
+        self.show_welcome_screen(chat_id, user_id, username, None, [])
+        return
+    
+    # Debug: Print channels
+    print(f"📢 Available channels: {channels}")
+    
+    msg = """🔐 <b>Channel Verification Required</b>
 
 To use this bot and earn money, you must join our official channels first.
 
 👇 <b>Join these channels:</b>\n"""
-        
-        buttons = []
-        
-        for channel_id, channel in channels.items():
-            channel_name = channel.get("name", "Channel")
-            channel_link = channel.get("link", "")
+    
+    buttons = []
+    
+    for channel_id, channel in channels.items():
+        if not channel:
+            continue
             
-            if channel_link.startswith("@"):
-                channel_url = f"https://t.me/{channel_link[1:]}"
-            elif "t.me/" in channel_link:
-                channel_url = channel_link
+        channel_name = channel.get("name", "Channel")
+        channel_link = channel.get("link", "")
+        
+        print(f"📢 Processing channel: {channel_name} | Link: {channel_link}")
+        
+        if not channel_link:
+            continue
+        
+        # Fix channel link format
+        if channel_link.startswith("@"):
+            channel_url = f"https://t.me/{channel_link[1:]}"
+        elif "t.me/" in channel_link:
+            if not channel_link.startswith("https://"):
+                channel_url = f"https://{channel_link}"
             else:
-                channel_url = f"https://t.me/{channel_link}"
-            
-            msg += f"\n📢 {channel_name}"
-            buttons.append({"text": f"📢 {channel_name}", "url": channel_url})
+                channel_url = channel_link
+        elif channel_link.startswith("https://t.me/"):
+            channel_url = channel_link
+        else:
+            channel_url = f"https://t.me/{channel_link}"
         
-        msg += "\n\n✅ After joining all channels, click <b>Verify Join</b>"
+        msg += f"\n📢 {channel_name}"
+        buttons.append({"text": f"📢 {channel_name}", "url": channel_url})
+    
+    if not buttons:
+        msg = """⚠️ <b>No Channels Available</b>
+
+Currently, no verification channels are set up.
+You can proceed directly to the bot."""
         
-        buttons.append(("✅ Verify Join", "check_verification"))
-        buttons.append(("🔄 Refresh", "refresh_verification"))
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.send_message(chat_id, msg, keyboard)
+        self.db.mark_user_verified(user_id)
+        self.show_welcome_screen(chat_id, user_id, username, None, [])
+        return
+    
+    msg += "\n\n✅ After joining all channels, click <b>Verify Join</b>"
+    
+    buttons.append(("✅ Verify Join", "check_verification"))
+    buttons.append(("🔄 Refresh", "refresh_verification"))
+    
+    keyboard = self.generate_keyboard(buttons, 2)
+    self.bot.send_message(chat_id, msg, keyboard)
     
     def check_verification(self, chat_id, message_id, user_id):
-        """Check if user has joined all channels"""
-        channels = self.db.get_channels()
-        
-        if not channels:
-            # No channels required, auto verify
-            self.db.mark_user_verified(user_id)
-            self.show_verification_success(chat_id, message_id, user_id)
-            return
-        
-        user = self.db.get_user(user_id)
-        if not user:
-            self.bot.send_message(chat_id, "❌ User not found.")
-            return
-        
-        all_joined = True
-        not_joined_channels = []
-        
-        for channel_id, channel in channels.items():
-            channel_link = channel.get("link", "")
+    """Check if user has joined all channels"""
+    channels = self.db.get_channels()
+    
+    print(f"🔍 Checking verification for user {user_id}")
+    print(f"📢 Total channels to check: {len(channels) if channels else 0}")
+    
+    if not channels:
+        # No channels required, auto verify
+        self.db.mark_user_verified(user_id)
+        self.show_verification_success(chat_id, message_id, user_id)
+        return
+    
+    user = self.db.get_user(user_id)
+    if not user:
+        self.bot.send_message(chat_id, "❌ User not found.")
+        return
+    
+    all_joined = True
+    not_joined_channels = []
+    
+    for channel_id, channel in channels.items():
+        if not channel:
+            continue
             
-            if not channel_link:
-                continue
+        channel_link = channel.get("link", "")
+        channel_name = channel.get("name", "Channel")
+        
+        if not channel_link:
+            continue
+        
+        print(f"🔍 Checking channel: {channel_name} ({channel_link})")
+        
+        try:
+            # Fix channel link format for API
+            if channel_link.startswith("https://t.me/"):
+                chat_username = channel_link.replace("https://t.me/", "")
+            elif channel_link.startswith("@"):
+                chat_username = channel_link[1:]
+            elif "t.me/" in channel_link:
+                chat_username = channel_link.split("t.me/")[-1]
+            else:
+                chat_username = channel_link
             
-            try:
-                member_info = self.bot.get_chat_member(channel_link, user_id)
+            # Remove any query parameters
+            chat_username = chat_username.split('?')[0]
+            
+            print(f"🔍 API Check: chat_id={chat_username}, user_id={user_id}")
+            
+            member_info = self.bot.get_chat_member(chat_username, user_id)
+            
+            if member_info:
+                status = member_info.get("status", "")
+                print(f"✅ Status: {status}")
                 
-                if member_info and member_info.get("status") in ["member", "administrator", "creator"]:
+                if status in ["member", "administrator", "creator"]:
                     self.db.mark_channel_joined(user_id, channel_id)
+                    print(f"✅ User is member of {channel_name}")
                 else:
                     all_joined = False
-                    not_joined_channels.append(channel.get("name", "Channel"))
-            
-            except Exception as e:
-                print(f"⚠️ Error checking channel: {e}")
+                    not_joined_channels.append(channel_name)
+                    print(f"❌ User NOT member of {channel_name}")
+            else:
                 all_joined = False
-                not_joined_channels.append(channel.get("name", "Channel"))
+                not_joined_channels.append(channel_name)
+                print(f"❌ No member info for {channel_name}")
         
-        if all_joined:
-            self.db.mark_user_verified(user_id)
-            self.show_verification_success(chat_id, message_id, user_id)
-        else:
-            self.show_verification_failed(chat_id, message_id, user_id, not_joined_channels)
+        except Exception as e:
+            print(f"⚠️ Error checking channel {channel_name}: {e}")
+            all_joined = False
+            not_joined_channels.append(channel_name)
+    
+    print(f"📊 Verification result: {'PASS' if all_joined else 'FAIL'}")
+    print(f"📋 Missing channels: {not_joined_channels}")
+    
+    if all_joined:
+        self.db.mark_user_verified(user_id)
+        self.show_verification_success(chat_id, message_id, user_id)
+    else:
+        self.show_verification_failed(chat_id, message_id, user_id, not_joined_channels)
     
     def show_verification_success(self, chat_id, message_id, user_id):
         """Show verification success"""
@@ -809,26 +873,27 @@ Share with friends and earn!"""
         self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def show_withdraw_menu(self, chat_id, message_id, user_id, user):
-        pending = user.get("pending_balance", 0)
-        upi_id = user.get("upi_id", "")
-        
-        if not upi_id:
-            msg = f"""❌ <b>UPI ID Required</b>
+    pending = user.get("pending_balance", 0)
+    upi_id = user.get("upi_id", "")
+    
+    if not upi_id:
+        msg = f"""❌ <b>UPI ID Required</b>
 
 You need to set up your UPI ID first.
 UPI ID format: <code>username@upi</code>
 
 Current balance: <b>₹{pending}</b>
 Minimum withdrawal: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>"""
-            
-            buttons = [
-                ("📱 Setup UPI ID", "setup_upi"),
-                ("📊 Dashboard", "dashboard"),
-                ("🏠 Main Menu", "main_menu")
-            ]
         
-        elif pending >= Config.MINIMUM_WITHDRAWAL:
-            msg = f"""💳 <b>Withdraw Funds</b>
+        buttons = [
+            ("📱 Setup UPI ID", "setup_upi"),
+            ("📜 Withdrawal History", "withdraw_history"),  # ✅ ADDED HERE
+            ("📊 Dashboard", "dashboard"),
+            ("🏠 Main Menu", "main_menu")
+        ]
+    
+    elif pending >= Config.MINIMUM_WITHDRAWAL:
+        msg = f"""💳 <b>Withdraw Funds</b>
 
 💰 Available: <b>₹{pending}</b>
 💰 Minimum: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>
@@ -838,33 +903,34 @@ Minimum withdrawal: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>"""
 • UPI Only (Google Pay, PhonePe, Paytm)
 
 ⚠️ Payment processed within 24 hours"""
-            
-            buttons = [
-                ("✅ Request Withdrawal", "request_withdraw"),
-                ("✏️ Change UPI", "setup_upi"),
-                ("📜 History", "withdraw_history"),
-                ("🏠 Main Menu", "main_menu")
-            ]
-        else:
-            needed = Config.MINIMUM_WITHDRAWAL - pending
-            referrals_needed = (needed + Config.REWARD_PER_REFERRAL - 1) // Config.REWARD_PER_REFERRAL
-            
-            msg = f"""❌ <b>Insufficient Balance</b>
+        
+        buttons = [
+            ("✅ Request Withdrawal", "request_withdraw"),
+            ("✏️ Change UPI", "setup_upi"),
+            ("📜 History", "withdraw_history"),
+            ("🏠 Main Menu", "main_menu")
+        ]
+    else:
+        needed = Config.MINIMUM_WITHDRAWAL - pending
+        referrals_needed = (needed + Config.REWARD_PER_REFERRAL - 1) // Config.REWARD_PER_REFERRAL
+        
+        msg = f"""❌ <b>Insufficient Balance</b>
 
 💰 Available: <b>₹{pending}</b>
 💰 Required: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>
 📊 Need: <b>₹{needed}</b> more
 
 🔗 Get {referrals_needed} more referrals to withdraw."""
-            
-            buttons = [
-                ("🔗 Get Link", "my_referral"),
-                ("📊 Dashboard", "dashboard"),
-                ("🏠 Main Menu", "main_menu")
-            ]
         
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+        buttons = [
+            ("🔗 Get Link", "my_referral"),
+            ("📜 Withdrawal History", "withdraw_history"),  # ✅ ADDED HERE
+            ("📊 Dashboard", "dashboard"),
+            ("🏠 Main Menu", "main_menu")
+        ]
+    
+    keyboard = self.generate_keyboard(buttons, 2)
+    self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def setup_upi_id(self, chat_id, message_id, user_id):
         msg = """📱 <b>Setup UPI ID</b>
@@ -1163,58 +1229,107 @@ Add more or delete existing channels."""
         self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def show_add_channel(self, chat_id, message_id, user_id):
-        """Show add channel interface"""
-        msg = """➕ <b>Add New Channel</b>
+    """Show add channel interface"""
+    msg = """➕ <b>Add New Channel</b>
 
 Send channel details in this format:
 
-<code>Channel Name
-@channel_username
-channel_id</code>
+<b>Channel Name
+Channel Username/Link</b>
 
-<b>Example:</b>
+<b>Examples:</b>
 <code>Trade Genius Official
-@TradeGenius07
--1001234567890</code>
+@TradeGenius07</code>
+
+<code>Cryptocurrency News
+https://t.me/CryptoNews</code>
+
+<code>Tech Updates
+TechUpdatesOfficial</code>
 
 <b>Important:</b>
 • Bot must be ADMIN in the channel
-• Get channel ID from @username_to_id_bot
+• Channel link should be public
 • Users must join ALL channels to use bot"""
+    
+    self.user_states[user_id] = {
+        "state": "awaiting_channel",
+        "chat_id": chat_id,
+        "message_id": message_id
+    }
+    
+    buttons = [("❌ Cancel", "admin_channels")]
+    keyboard = self.generate_keyboard(buttons, 1)
+    self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+
+def handle_user_message(self, chat_id, user_id, text):
+    """Handle user text messages"""
+    if user_id in self.user_states:
+        state = self.user_states[user_id]
         
-        self.user_states[user_id] = {
-            "state": "awaiting_channel",
-            "chat_id": chat_id,
-            "message_id": message_id
-        }
-        
-        buttons = [("❌ Cancel", "admin_channels")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+        elif state.get("state") == "awaiting_channel":
+            lines = text.strip().split('\n')
+            if len(lines) >= 2:
+                channel_name = lines[0].strip()
+                channel_link = lines[1].strip()
+                
+                # Generate channel ID
+                channel_id = hashlib.md5(channel_link.encode()).hexdigest()[:10]
+                
+                channel_data = {
+                    "name": channel_name,
+                    "link": channel_link,
+                    "id": channel_id,
+                    "added_by": str(user_id),
+                    "added_at": datetime.now().isoformat()
+                }
+                
+                result = self.db.add_channel(channel_data)
+                
+                if result:
+                    msg = f"""✅ <b>Channel Added Successfully!</b>
+
+📢 <b>Channel Name:</b> {channel_name}
+🔗 <b>Channel Link:</b> {channel_link}
+🆔 <b>Channel ID:</b> {channel_id}
+
+Users will now need to join this channel to use the bot."""
+                else:
+                    msg = "❌ Failed to add channel. Please try again."
+            else:
+                msg = "❌ Invalid format. Please send:\n\nChannel Name\nChannel Link"
+            
+            buttons = [("📢 View Channels", "admin_view_channels"), ("🔙 Back", "admin_channels")]
+            keyboard = self.generate_keyboard(buttons, 2)
+            self.bot.send_message(chat_id, msg, keyboard)
+            del self.user_states[user_id]
     
     def show_channel_list(self, chat_id, message_id, user_id):
-        """Show list of channels"""
-        channels = self.db.get_channels()
+    """Show list of channels"""
+    channels = self.db.get_channels()
+    
+    if not channels:
+        msg = "📢 <b>No Channels</b>\n\nNo channels added yet.\nUsers will NOT see verification screen."
+        buttons = [("➕ Add Channel", "admin_add_channel"), ("🔙 Back", "admin_channels")]
+    else:
+        msg = "📢 <b>Current Channels</b>\n\nUsers must join ALL these channels:\n"
+        buttons = []
         
-        if not channels:
-            msg = "📢 <b>No Channels</b>\n\nNo channels added yet.\nUsers will NOT see verification screen."
-            buttons = [("➕ Add Channel", "admin_add_channel"), ("🔙 Back", "admin_channels")]
-        else:
-            msg = "📢 <b>Current Channels</b>\n\nUsers must join ALL these channels:\n"
-            buttons = []
-            
-            for i, (channel_id, channel) in enumerate(channels.items(), 1):
-                name = channel.get("name", "Unknown")
-                link = channel.get("link", "")
-                msg += f"{i}. {name}\n   {link}\n\n"
+        for i, (channel_id, channel) in enumerate(channels.items(), 1):
+            if not channel:
+                continue
                 
-                buttons.append((f"❌ Delete {i}", f"admin_delete_channel_{channel_id}"))
+            name = channel.get("name", "Unknown")
+            link = channel.get("link", "No link")
+            msg += f"{i}. <b>{name}</b>\n   🔗 {link}\n\n"
             
-            buttons.append(("➕ Add More", "admin_add_channel"))
-            buttons.append(("🔙 Back", "admin_channels"))
+            buttons.append((f"❌ Delete {i}", f"admin_delete_channel_{channel_id}"))
         
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+        buttons.append(("➕ Add More", "admin_add_channel"))
+        buttons.append(("🔙 Back", "admin_channels"))
+    
+    keyboard = self.generate_keyboard(buttons, 2)
+    self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def delete_channel(self, chat_id, message_id, user_id, channel_id):
         """Delete a channel"""
@@ -1411,7 +1526,6 @@ Example:
             msg = f"""📞 <b>Support</b>
 
 Channel: {Config.SUPPORT_CHANNEL}
-Admin: @AdminUsername
 
 We're here to help!"""
         
