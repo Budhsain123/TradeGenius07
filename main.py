@@ -1484,40 +1484,31 @@ You can now request withdrawals."""
                 
                 time.sleep(0.3)
                 
-except KeyboardInterrupt:
-                print("\n🛑 Bot stopped")
-                self.running = False
-                
-            except Exception as e:
-                print(f"❌ Error: {e}")
-                time.sleep(5)
-
 # ==================== START BOT ====================
 if __name__ == "__main__":
     print("🔥 Trade Genius Bot Starting...")
     print(f"👑 Admin: {Config.ADMIN_USER_ID}")
     print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
     print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
-    
+
     if Config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("❌ Configure bot token first!")
     else:
-        bot = TradeGeniusBot()
-
-        # 🔥 BOT THREAD
         import threading
-        bot_thread = threading.Thread(target=bot.run)
-        bot_thread.start()
-
-        # 🌐 RENDER ENDPOINT FIX
         from flask import Flask
         import os
 
+        bot = TradeGeniusBot()
+
+        # 🔥 BOT THREAD
+        threading.Thread(target=bot.run, daemon=True).start()
+
+        # 🌐 RENDER PORT BIND
         app = Flask(__name__)
 
         @app.route("/")
         def home():
-            return "✅ Trade Genius Bot is running on Render"
+            return "✅ Trade Genius Bot is running"
 
         port = int(os.environ.get("PORT", 8080))
         app.run(host="0.0.0.0", port=port)
