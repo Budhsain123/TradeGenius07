@@ -13,4 +13,3 @@ charset-normalizer
 pillow
 cryptography
 flask
-os
