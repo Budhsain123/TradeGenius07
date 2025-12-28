@@ -2,7 +2,7 @@
 
 """
 🔥 Trade Genius Bot - UPDATED Version
-✅ Open Web Button added
+✅ Open Web Button added with updated text
 ✅ Admin can change Web URL
 ✅ UPI ID/Mono Form in withdrawals
 ✅ Fixed Channel Verification
@@ -44,7 +44,7 @@ def run_flask():
 class Config:
     BOT_TOKEN = "8285080906:AAHEfKnYLeW_ygtgtqgzbbLfbaMJGRuSEgM"
     BOT_USERNAME = "TradeGenius07Pro_bot"
-    WEB_URL = "https://traderjoebot.com"  # Default web URL
+    WEB_URL = "https://www.thecoinsage.com/"  # 🆕 Updated default web URL
     
     FIREBASE_URL = "https://colortraderpro-panel-default-rtdb.firebaseio.com/"
     
@@ -104,7 +104,7 @@ class FirebaseDB:
             "settings": {
                 "reward_per_referral": Config.REWARD_PER_REFERRAL,
                 "minimum_withdrawal": Config.MINIMUM_WITHDRAWAL,
-                "web_url": Config.WEB_URL  # 🆕 Store web URL
+                "web_url": Config.WEB_URL
             }
         }
     
@@ -171,8 +171,8 @@ class FirebaseDB:
             "referrer": None,
             "referral_claimed": False,
             "upi_id": "",
-            "phone": "",  # 🆕 For Mono form
-            "email": "",  # 🆕 For Mono form
+            "phone": "",
+            "email": "",
             "is_verified": is_admin,
             "channels_joined": {},
             "created_at": datetime.now().isoformat(),
@@ -419,7 +419,7 @@ class TradeGeniusBot:
         
         return {"inline_keyboard": keyboard}
     
-    # 🆕 Open Web Button Added
+    # 🆕 Open Web Button with updated text
     def get_main_menu_buttons(self, user_id):
         is_admin = (str(user_id) == Config.ADMIN_USER_ID)
         
@@ -427,7 +427,7 @@ class TradeGeniusBot:
             ("🔗 Get Referral Link", "my_referral"),
             ("📊 My Dashboard", "dashboard"),
             ("💳 Withdraw", "withdraw"),
-            ("🌐 Open Web", "open_web"),  # 🆕 NEW BUTTON
+            ("🪙 Get Free Coins", "open_web"),  # 🆕 UPDATED BUTTON TEXT
             ("📜 Terms & Conditions", "terms_conditions"),
             ("📢 How It Works", "how_it_works"),
             ("🎁 Rewards", "rewards"),
@@ -772,19 +772,17 @@ Welcome to <b>Trade Genius</b>, @{username}!
             self.show_terms_conditions(chat_id, message_id, user_id)
             return
         
-        # 🆕 Handle Open Web
+        # 🆕 Handle Open Web with simple message
         if callback == "open_web":
             web_url = self.db.get_web_url()
             buttons = [
-                {"text": "🌐 Open Website", "url": web_url},
+                {"text": "🪙 Get Free Coins Now", "url": web_url},
                 ("🏠 Main Menu", "main_menu")
             ]
             keyboard = self.generate_keyboard(buttons, 2)
-            msg = f"""🌐 <b>Open Website</b>
+            msg = f"""🪙 <b>Get Free Coins</b>
 
-Click the button below to visit our website:
-
-{web_url}"""
+Click the button below to claim free coins:"""
             self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
             return
         
@@ -1009,19 +1007,19 @@ Send your UPI ID in this format:
         
         withdrawal_id = f"WD{random.randint(100000, 999999)}"
         
-        # 🆕 UPI/Mono Form Data
+        # UPI/Mono Form Data
         withdrawal_data = {
             "user_id": str(user_id),
             "username": user.get("username", ""),
             "amount": pending,
             "upi_id": upi_id,
-            "phone": user.get("phone", ""),  # 🆕 Phone number for Mono
-            "email": user.get("email", ""),  # 🆕 Email for Mono
-            "payment_method": "upi",  # Default
+            "phone": user.get("phone", ""),
+            "email": user.get("email", ""),
+            "payment_method": "upi",
             "status": "pending",
             "requested_at": datetime.now().isoformat(),
             "withdrawal_id": withdrawal_id,
-            "form_type": "upi/mono"  # 🆕 Form type indicator
+            "form_type": "upi/mono"
         }
         
         self.db.create_withdrawal(withdrawal_id, withdrawal_data)
@@ -1031,7 +1029,7 @@ Send your UPI ID in this format:
             "withdrawn": user.get("withdrawn", 0) + pending
         })
         
-        # 🆕 IMPROVED Admin Notification with UPI/Mono Form
+        # IMPROVED Admin Notification with UPI/Mono Form
         admin_msg = f"""🆕 <b>WITHDRAWAL REQUEST</b>
 
 👤 User: @{user.get('username', 'N/A')}
@@ -1148,7 +1146,7 @@ Payment within 24 hours."""
             ("📊 Statistics", "admin_stats"),
             ("💳 Withdrawals", "admin_withdrawals"),
             ("📢 Channels", "admin_channels"),
-            ("🌐 Web URL", "admin_web_url"),  # 🆕 NEW OPTION
+            ("🌐 Web URL", "admin_web_url"),
             ("👥 Users", "admin_users"),
             ("📢 Broadcast", "admin_broadcast"),
             ("🏠 Main Menu", "main_menu")
@@ -1167,7 +1165,6 @@ Payment within 24 hours."""
         elif callback == "admin_channels":
             self.show_channel_management(chat_id, message_id, user_id)
         
-        # 🆕 Handle Web URL Management
         elif callback == "admin_web_url":
             self.show_web_url_management(chat_id, message_id, user_id)
         
@@ -1195,11 +1192,10 @@ Payment within 24 hours."""
             wd_id = callback.replace("admin_reject_", "")
             self.reject_withdrawal(chat_id, message_id, user_id, wd_id)
         
-        # 🆕 Handle Web URL Update
         elif callback == "admin_update_web_url":
             self.show_update_web_url(chat_id, message_id, user_id)
     
-    # 🆕 Web URL Management Methods
+    # Web URL Management Methods
     def show_web_url_management(self, chat_id, message_id, user_id):
         web_url = self.db.get_web_url()
         
@@ -1409,7 +1405,6 @@ channel_id</code>
         else:
             self.db.update_withdrawal_status(withdrawal_id, "completed", f"Approved by admin {user_id}")
             
-            # 🆕 Detailed user notification
             user_msg = f"""✅ <b>Withdrawal Approved!</b>
 
 💰 Amount: <b>₹{wd_data['amount']}</b>
@@ -1653,7 +1648,6 @@ You can now request withdrawals."""
             elif state.get("state") == "awaiting_rejection_reason":
                 self.process_rejection_reason(user_id, text)
             
-            # 🆕 Handle Web URL Update
             elif state.get("state") == "awaiting_web_url":
                 new_url = text.strip()
                 
@@ -1665,7 +1659,7 @@ You can now request withdrawals."""
 
 New URL: <code>{new_url}</code>
 
-The "Open Web" button will now use this URL."""
+The "Get Free Coins" button will now use this URL."""
                     else:
                         msg = "❌ Failed to update web URL."
                 else:
@@ -1707,7 +1701,7 @@ The "Open Web" button will now use this URL."""
         print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
         print(f"🌐 Web URL: {self.db.get_web_url()}")
         print("✅ FIXED: Channel verification errors")
-        print("✅ ADDED: Open Web button")
+        print("✅ ADDED: 'Get Free Coins' button")
         print("✅ ADDED: Admin can change Web URL")
         print("✅ ADDED: UPI/Mono Form in withdrawals")
         print("="*50)
@@ -1779,7 +1773,7 @@ if __name__ == "__main__":
     print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
     print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
     print("✅ FIXED: Channel verification errors")
-    print("✅ ADDED: Open Web button in main menu")
+    print("✅ ADDED: 'Get Free Coins' button in main menu")
     print("✅ ADDED: Admin can change Web URL")
     print("✅ IMPROVED: UPI/Mono Form in withdrawal requests")
     print("="*50)
