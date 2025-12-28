@@ -1,0 +1,26 @@
+# 📦 Trade Genius Bot - Requirements
+# Python 3.8+ Required
+
+# Core Dependencies
+python-telegram-bot==20.7
+pyrebase4==5.0.1
+requests==2.31.0
+
+# Firebase & Database
+firebase-admin==6.2.0
+google-cloud-firestore==2.13.1
+
+# Utilities
+python-dotenv==1.0.0
+python-dateutil==2.8.2
+pytz==2023.3
+uuid==1.30
+
+# For Pydroid 3 Compatibility
+urllib3==2.0.7
+certifi==2023.7.22
+charset-normalizer==3.2.0
+
+# Optional (for advanced features)
+pillow==10.1.0  # For image processing
+cryptography==41.0.4  # For secure operations
