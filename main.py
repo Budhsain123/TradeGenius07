@@ -1,9 +1,11 @@
-# main.py - Complete Bot with Fixed Requirements
+# main.py - Complete Bot with Flask Server and Terms & Conditions
+
 """
 🔥 Trade Genius Bot - Final Version
 ✅ Channel Verification Only for Users | ✅ Admin No Verification
 ✅ 20₹ Minimum Withdrawal | ✅ No Channels = No Verification
 ✅ 2₹ Per Referral | ✅ UPI Only Withdrawal
+✅ Flask Server for Render | ✅ Terms & Conditions Button
 """
 
 import os
@@ -15,6 +17,32 @@ import random
 import string
 from datetime import datetime
 from urllib.parse import urlencode, quote
+from flask import Flask, request, jsonify  # Added Flask
+
+# ==================== FLASK SERVER SETUP ====================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return jsonify({
+        "status": "online",
+        "bot": "TradeGeniusBot",
+        "message": "Telegram bot is running"
+    })
+
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy"})
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    # Optional: Add webhook support
+    return jsonify({"status": "webhook_received"})
+
+def run_flask():
+    """Run Flask server for Render"""
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # ==================== CONFIGURATION ====================
 class Config:
@@ -37,10 +65,34 @@ class Config:
     # Bot Settings
     LOG_FILE = "bot_logs.txt"
     DATA_FILE = "local_backup.json"
+    
+    # Terms & Conditions
+    TERMS_TEXT = """📜 <b>Terms & Conditions</b>
+
+✅ <b>By using this bot, you agree to:</b>
+
+1. <b>Join all channels</b> to earn points
+2. Each user can earn points from <b>ONLY ONE referrer</b>
+3. <b>No self-referrals</b> allowed
+4. Points and coupons are <b>non-transferable</b>
+5. <b>Fraudulent activity</b> will result in permanent ban
+6. Admin reserves the right to modify terms
+7. Minimum withdrawal amount: ₹20
+8. Payments processed within 24 hours
+9. UPI is the only withdrawal method
+
+📝 <b>Important Notes:</b>
+• We don't ask for passwords or OTPs
+• Keep your UPI ID updated
+• Report suspicious activity immediately
+• Terms may change without notice
+
+<i>Last Updated: {}</i>""".format(datetime.now().strftime("%d %B %Y"))
 
 # ==================== HTTP HELPER ====================
 import urllib.request
 import urllib.error
+import threading  # Added for multi-threading
 
 class HTTPHelper:
     @staticmethod
@@ -137,7 +189,8 @@ class FirebaseDB:
             "channels_joined": {},
             "created_at": datetime.now().isoformat(),
             "last_active": datetime.now().isoformat(),
-            "is_admin": (user_id == Config.ADMIN_USER_ID)
+            "is_admin": (user_id == Config.ADMIN_USER_ID),
+            "agreed_to_terms": False  # New field for T&C
         }
         
         # If user is admin, auto-verify
@@ -171,6 +224,10 @@ class FirebaseDB:
         self._save_local_backup()
         
         return True if result else False
+    
+    def mark_terms_accepted(self, user_id):
+        """Mark user as accepted terms"""
+        return self.update_user(user_id, {"agreed_to_terms": True})
     
     def mark_user_verified(self, user_id):
         """Mark user as verified"""
@@ -376,6 +433,7 @@ class TradeGeniusBot:
             ("🔗 Get Referral Link", "my_referral"),
             ("📊 My Dashboard", "dashboard"),
             ("💳 Withdraw", "withdraw"),
+            ("📜 Terms & Conditions", "terms_conditions"),  # Added T&C button
             ("📢 How It Works", "how_it_works"),
             ("🎁 Rewards", "rewards"),
             ("📞 Support", "support"),
@@ -385,6 +443,75 @@ class TradeGeniusBot:
             buttons.append(("👑 Admin Panel", "admin_panel"))
         
         return buttons
+    
+    def show_terms_conditions(self, chat_id, message_id, user_id):
+        """Show Terms & Conditions"""
+        user = self.db.get_user(user_id)
+        
+        if not user:
+            user = self.db.create_user(user_id, "User")
+        
+        terms_accepted = user.get("agreed_to_terms", False)
+        
+        msg = Config.TERMS_TEXT
+        
+        if not terms_accepted:
+            msg += "\n\n⚠️ <b>You must accept terms to continue</b>"
+            buttons = [
+                ("✅ I Agree", "accept_terms"),
+                ("❌ Cancel", "main_menu")
+            ]
+        else:
+            buttons = [
+                ("✅ Accepted", "show_acceptance"),
+                ("🏠 Main Menu", "main_menu")
+            ]
+        
+        keyboard = self.generate_keyboard(buttons, 2)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+    
+    def accept_terms(self, chat_id, message_id, user_id):
+        """User accepts terms"""
+        self.db.mark_terms_accepted(user_id)
+        
+        msg = """✅ <b>Terms Accepted</b>
+
+Thank you for agreeing to our Terms & Conditions.
+
+You can now use all features of Trade Genius Bot.
+
+👇 <b>Get started:</b>"""
+        
+        buttons = [
+            ("🔗 Get Referral Link", "my_referral"),
+            ("📊 Dashboard", "dashboard"),
+            ("🏠 Main Menu", "main_menu")
+        ]
+        
+        keyboard = self.generate_keyboard(buttons, 2)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+    
+    def show_terms_acceptance(self, chat_id, message_id, user_id):
+        """Show acceptance status"""
+        user = self.db.get_user(user_id)
+        accepted_date = user.get("agreed_to_terms", False)
+        
+        if accepted_date:
+            msg = """✅ <b>Terms Accepted</b>
+
+You have already accepted our Terms & Conditions.
+
+You can review them anytime from the main menu."""
+        else:
+            msg = """❌ <b>Terms Not Accepted</b>
+
+You must accept Terms & Conditions to use this bot.
+
+Please review and accept them from the main menu."""
+        
+        buttons = [("📜 View Terms", "terms_conditions"), ("🏠 Main Menu", "main_menu")]
+        keyboard = self.generate_keyboard(buttons, 2)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def start_command(self, chat_id, user_id, username, args):
         """Handle /start command"""
@@ -397,6 +524,11 @@ class TradeGeniusBot:
         if str(user_id) == Config.ADMIN_USER_ID:
             user["is_verified"] = True
             self.db.update_user(user_id, {"is_verified": True})
+        
+        # Check terms acceptance for non-admin users
+        if str(user_id) != Config.ADMIN_USER_ID and not user.get("agreed_to_terms", False):
+            self.show_terms_welcome(chat_id, user_id, username)
+            return
         
         # Check if user needs verification
         if not user.get("is_verified", False):
@@ -413,6 +545,61 @@ class TradeGeniusBot:
         
         # User is verified, show welcome screen
         self.show_welcome_screen(chat_id, user_id, username, user, args)
+    
+    def show_terms_welcome(self, chat_id, user_id, username):
+        """Show welcome screen with terms first"""
+        msg = f"""👋 <b>Welcome to Trade Genius Bot!</b> 💸
+
+👤 Hello, @{username}!
+
+📜 <b>Before you start,</b> please read and accept our Terms & Conditions.
+
+This is required to ensure fair usage for all users."""
+
+        buttons = [
+            ("📜 Read Terms", "terms_conditions"),
+            ("❌ Skip for Now", "skip_terms")
+        ]
+        
+        keyboard = self.generate_keyboard(buttons, 2)
+        self.bot.send_message(chat_id, msg, keyboard)
+    
+    def skip_terms(self, chat_id, message_id, user_id):
+        """Handle terms skipping"""
+        msg = """⚠️ <b>Limited Access</b>
+
+You can browse but <b>cannot earn or withdraw</b> without accepting Terms & Conditions.
+
+Accept terms to unlock full features."""
+        
+        buttons = [
+            ("📜 Accept Terms", "terms_conditions"),
+            ("👀 Browse Features", "main_menu_limited")
+        ]
+        
+        keyboard = self.generate_keyboard(buttons, 2)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+    
+    def show_main_menu_limited(self, chat_id, message_id, user_id):
+        """Show limited menu for users who haven't accepted terms"""
+        msg = """🏠 <b>Main Menu (Limited Access)</b>
+
+⚠️ <b>Accept Terms to unlock:</b>
+• Earn money from referrals
+• Withdraw funds
+• Full dashboard access
+
+📜 <b>Available Features:</b>"""
+        
+        buttons = [
+            ("📜 Terms & Conditions", "terms_conditions"),
+            ("📢 How It Works", "how_it_works"),
+            ("🎁 Rewards Info", "rewards"),
+            ("📞 Support", "support")
+        ]
+        
+        keyboard = self.generate_keyboard(buttons, 2)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def show_verification_screen(self, chat_id, user_id, username):
         """Show channel verification screen ONLY if channels exist"""
@@ -560,8 +747,13 @@ You haven't joined all required channels.
         if not user:
             user = self.db.create_user(user_id, username)
         
-        # Process referral if provided - ONLY if user is verified
-        if args and len(args) > 0 and user.get("is_verified", False):
+        # Check terms acceptance
+        if not user.get("agreed_to_terms", False) and str(user_id) != Config.ADMIN_USER_ID:
+            self.show_terms_welcome(chat_id, user_id, username)
+            return
+        
+        # Process referral if provided - ONLY if user is verified and accepted terms
+        if args and len(args) > 0 and user.get("is_verified", False) and user.get("agreed_to_terms", False):
             referral_code = args[0]
             
             if not user.get("referral_claimed", False):
@@ -577,7 +769,7 @@ You haven't joined all required channels.
                 if referrer_id and referrer_id != str(user_id):
                     # Update referrer stats
                     referrer = self.db.get_user(referrer_id)
-                    if referrer and referrer.get("is_verified", False):
+                    if referrer and referrer.get("is_verified", False) and referrer.get("agreed_to_terms", False):
                         new_refs = referrer.get("referrals", 0) + 1
                         reward = Config.REWARD_PER_REFERRAL  # 2₹
                         
@@ -612,10 +804,11 @@ Keep sharing to earn more!"""
         is_admin = (str(user_id) == Config.ADMIN_USER_ID)
         admin_text = "\n👑 <b>Admin Status: Active</b>" if is_admin else ""
         verified_text = "\n✅ <b>Status: Verified</b>" if user.get("is_verified", False) else "\n❌ <b>Status: Not Verified</b>"
+        terms_text = "\n📜 <b>Terms: Accepted</b>" if user.get("agreed_to_terms", False) else "\n⚠️ <b>Terms: Not Accepted</b>"
         
         welcome_msg = f"""👋 <b>Welcome to Trade Genius Bot!</b> 💸
 
-👤 Hello, @{username}!{admin_text}{verified_text}
+👤 Hello, @{username}!{admin_text}{verified_text}{terms_text}
 
 💰 Earn <b>₹{Config.REWARD_PER_REFERRAL}</b> per referral
 🔗 Your Code: <code>{user.get('referral_code', 'N/A')}</code>
@@ -643,6 +836,28 @@ Keep sharing to earn more!"""
             keyboard = self.generate_keyboard([("🏠 Main Menu", "main_menu")], 1)
             self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
             return
+        
+        # Handle terms-related callbacks
+        if callback in ["terms_conditions", "accept_terms", "show_acceptance", "skip_terms", "main_menu_limited"]:
+            if callback == "terms_conditions":
+                self.show_terms_conditions(chat_id, message_id, user_id)
+            elif callback == "accept_terms":
+                self.accept_terms(chat_id, message_id, user_id)
+            elif callback == "show_acceptance":
+                self.show_terms_acceptance(chat_id, message_id, user_id)
+            elif callback == "skip_terms":
+                self.skip_terms(chat_id, message_id, user_id)
+            elif callback == "main_menu_limited":
+                self.show_main_menu_limited(chat_id, message_id, user_id)
+            return
+        
+        # Check terms for non-admin users
+        if str(user_id) != Config.ADMIN_USER_ID and not user.get("agreed_to_terms", False):
+            if callback not in ["check_verification", "refresh_verification", "terms_conditions", "accept_terms"]:
+                msg = "📜 <b>Terms & Conditions Required</b>\n\nPlease accept Terms & Conditions first to use this feature."
+                keyboard = self.generate_keyboard([("📜 Accept Terms", "terms_conditions")], 1)
+                self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+                return
         
         # Admin has no verification check
         if str(user_id) != Config.ADMIN_USER_ID and not user.get("is_verified", False):
@@ -725,6 +940,7 @@ Share with friends and earn!"""
     
     def show_dashboard(self, chat_id, message_id, user_id, user):
         verified_status = "✅ Verified" if user.get("is_verified", False) else "❌ Not Verified"
+        terms_status = "✅ Accepted" if user.get("agreed_to_terms", False) else "❌ Not Accepted"
         
         msg = f"""📊 <b>Dashboard</b>
 
@@ -732,6 +948,7 @@ Share with friends and earn!"""
 🔗 Code: <code>{user.get('referral_code', 'N/A')}</code>
 📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>
 🔄 Status: <b>{verified_status}</b>
+📜 Terms: <b>{terms_status}</b>
 
 📈 <b>Statistics:</b>
 👥 Referrals: <b>{user.get('referrals', 0)}</b>
@@ -742,6 +959,7 @@ Share with friends and earn!"""
         buttons = [
             ("💳 Withdraw", "withdraw"),
             ("🔗 Get Link", "my_referral"),
+            ("📜 Terms", "terms_conditions"),
             ("🏠 Main Menu", "main_menu")
         ]
         
@@ -752,7 +970,19 @@ Share with friends and earn!"""
         pending = user.get("pending_balance", 0)
         upi_id = user.get("upi_id", "")
         
-        if not upi_id:
+        if not user.get("agreed_to_terms", False):
+            msg = """❌ <b>Terms Not Accepted</b>
+
+You must accept Terms & Conditions before withdrawing.
+
+Please review and accept the terms first."""
+            
+            buttons = [
+                ("📜 Accept Terms", "terms_conditions"),
+                ("🏠 Main Menu", "main_menu")
+            ]
+        
+        elif not upi_id:
             msg = f"""❌ <b>UPI ID Required</b>
 
 You need to set up your UPI ID first.
@@ -830,6 +1060,12 @@ Send your UPI ID in this format:
         self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def request_withdrawal(self, chat_id, message_id, user_id, user):
+        if not user.get("agreed_to_terms", False):
+            msg = "❌ You must accept Terms & Conditions first."
+            keyboard = self.generate_keyboard([("📜 Accept Terms", "terms_conditions")], 1)
+            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+            return
+        
         pending = user.get("pending_balance", 0)
         upi_id = user.get("upi_id", "")
         
@@ -935,8 +1171,9 @@ Payment within 24 hours."""
         is_admin = (str(user_id) == Config.ADMIN_USER_ID)
         admin_text = "\n👑 <b>Admin Mode</b>" if is_admin else ""
         verified_text = "\n✅ <b>Verified</b>" if user.get("is_verified", False) else "\n❌ <b>Not Verified</b>"
+        terms_text = "\n📜 <b>Terms Accepted</b>" if user.get("agreed_to_terms", False) else "\n⚠️ <b>Terms Not Accepted</b>"
         
-        msg = f"""🏠 <b>Main Menu</b>{admin_text}{verified_text}
+        msg = f"""🏠 <b>Main Menu</b>{admin_text}{verified_text}{terms_text}
 
 👋 @{user.get('username', 'User')}
 💰 Balance: <b>₹{user.get('pending_balance', 0)}</b>
@@ -957,10 +1194,14 @@ Payment within 24 hours."""
         channels = self.db.get_channels()
         total_channels = len(channels) if channels else 0
         
+        # Count users who accepted terms
+        accepted_terms = sum(1 for u in users.values() if u and u.get("agreed_to_terms", False))
+        
         msg = f"""👑 <b>Admin Control Panel</b>
 
 📊 <b>Stats:</b>
 👥 Users: {total_users}
+📜 Terms Accepted: {accepted_terms}/{total_users}
 💳 Pending WD: {pending_withdrawals}
 📢 Channels: {total_channels}
 
@@ -1017,6 +1258,7 @@ Payment within 24 hours."""
         
         total_users = len(users) if users else 0
         verified = sum(1 for u in users.values() if u and u.get("is_verified", False))
+        accepted_terms = sum(1 for u in users.values() if u and u.get("agreed_to_terms", False))
         total_earnings = sum(u.get("total_earnings", 0) for u in users.values() if u)
         
         channels = self.db.get_channels()
@@ -1027,6 +1269,7 @@ Payment within 24 hours."""
 👥 <b>Users:</b>
 • Total: {total_users}
 • Verified: {verified}
+• Accepted Terms: {accepted_terms}
 • Pending Verification: {total_users - verified}
 
 💰 <b>Financial:</b>
@@ -1042,286 +1285,23 @@ Payment within 24 hours."""
         keyboard = self.generate_keyboard(buttons, 2)
         self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
-    def show_withdrawal_management(self, chat_id, message_id, user_id):
-        withdrawals = self.db.get_withdrawals("pending")
-        
-        if not withdrawals:
-            msg = "💳 <b>Pending Withdrawals</b>\n\nNo pending requests."
-            buttons = [("🔄 Refresh", "admin_withdrawals"), ("🔙 Back", "admin_panel")]
-        else:
-            msg = "💳 <b>Pending Withdrawals</b>\n\n"
-            buttons = []
-            
-            for i, (wd_id, wd_data) in enumerate(withdrawals.items(), 1):
-                if wd_data:
-                    username = wd_data.get("username", "N/A")
-                    amount = wd_data.get("amount", 0)
-                    upi_id = wd_data.get("upi_id", "N/A")
-                    date = datetime.fromisoformat(wd_data["requested_at"]).strftime("%d/%m %H:%M")
-                    
-                    msg += f"{i}. ₹{amount} - @{username}\n"
-                    msg += f"   📱 {upi_id}\n"
-                    msg += f"   📅 {date}\n\n"
-                    
-                    buttons.append((f"✅ Approve {i}", f"admin_approve_{wd_id}"))
-                    buttons.append((f"❌ Reject {i}", f"admin_reject_{wd_id}"))
-            
-            buttons.append(("🔄 Refresh", "admin_withdrawals"))
-            buttons.append(("🔙 Back", "admin_panel"))
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_channel_management(self, chat_id, message_id, user_id):
-        channels = self.db.get_channels()
-        
-        if not channels:
-            msg = """📢 <b>Channel Management</b>
-
-No channels added yet.
-Users will NOT see verification screen.
-
-Add channels to require users to join before using bot."""
-        else:
-            msg = f"""📢 <b>Channel Management</b>
-
-{len(channels)} channel(s) added.
-Users MUST join these channels to use bot.
-
-Add more or delete existing channels."""
-        
-        buttons = [
-            ("➕ Add Channel", "admin_add_channel"),
-            ("👁 View Channels", "admin_view_channels"),
-            ("🔙 Back", "admin_panel")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_add_channel(self, chat_id, message_id, user_id):
-        msg = """➕ <b>Add New Channel</b>
-
-Send channel details in this format:
-
-<code>Channel Name
-@channel_username
-channel_id</code>
-
-<b>Example:</b>
-<code>Trade Genius Official
-@TradeGenius07
--1001234567890</code>
-
-<b>Important:</b>
-• Bot must be ADMIN in the channel
-• Get channel ID from @username_to_id_bot
-• Users must join ALL channels to use bot"""
-        
-        self.user_states[user_id] = {
-            "state": "awaiting_channel",
-            "chat_id": chat_id,
-            "message_id": message_id
-        }
-        
-        buttons = [("❌ Cancel", "admin_channels")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_channel_list(self, chat_id, message_id, user_id):
-        channels = self.db.get_channels()
-        
-        if not channels:
-            msg = "📢 <b>No Channels</b>\n\nNo channels added yet.\nUsers will NOT see verification screen."
-            buttons = [("➕ Add Channel", "admin_add_channel"), ("🔙 Back", "admin_channels")]
-        else:
-            msg = "📢 <b>Current Channels</b>\n\nUsers must join ALL these channels:\n"
-            buttons = []
-            
-            for i, (channel_id, channel) in enumerate(channels.items(), 1):
-                name = channel.get("name", "Unknown")
-                link = channel.get("link", "")
-                msg += f"{i}. {name}\n   {link}\n\n"
-                
-                buttons.append((f"❌ Delete {i}", f"admin_delete_channel_{channel_id}"))
-            
-            buttons.append(("➕ Add More", "admin_add_channel"))
-            buttons.append(("🔙 Back", "admin_channels"))
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def delete_channel(self, chat_id, message_id, user_id, channel_id):
-        result = self.db.delete_channel(channel_id)
-        
-        if result is None:
-            msg = "✅ Channel deleted successfully."
-        else:
-            msg = "❌ Failed to delete channel."
-        
-        buttons = [("📢 View Channels", "admin_view_channels"), ("🔙 Back", "admin_channels")]
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def approve_withdrawal(self, chat_id, message_id, user_id, withdrawal_id):
-        withdrawals = self.db.get_withdrawals()
-        wd_data = withdrawals.get(withdrawal_id) if withdrawals else None
-        
-        if not wd_data:
-            msg = f"❌ Withdrawal {withdrawal_id} not found."
-        else:
-            self.db.update_withdrawal_status(withdrawal_id, "completed", f"Approved by admin {user_id}")
-            
-            user_msg = f"""✅ <b>Withdrawal Approved!</b>
-
-💰 Amount: <b>₹{wd_data['amount']}</b>
-📋 ID: <code>{withdrawal_id}</code>
-📱 UPI: <code>{wd_data.get('upi_id', 'N/A')}</code>
-
-Payment processed successfully!"""
-            
-            self.bot.send_message(wd_data["user_id"], user_msg)
-            msg = f"✅ Withdrawal {withdrawal_id} approved."
-        
-        buttons = [("💳 Back to Withdrawals", "admin_withdrawals")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def reject_withdrawal(self, chat_id, message_id, user_id, withdrawal_id):
-        withdrawals = self.db.get_withdrawals()
-        wd_data = withdrawals.get(withdrawal_id) if withdrawals else None
-        
-        if not wd_data:
-            msg = f"❌ Withdrawal {withdrawal_id} not found."
-        else:
-            self.user_states[user_id] = {
-                "state": "awaiting_rejection_reason",
-                "withdrawal_id": withdrawal_id,
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "user_id": wd_data.get("user_id"),
-                "amount": wd_data.get("amount", 0)
-            }
-            
-            msg = f"""❌ <b>Reject Withdrawal</b>
-
-🆔 {withdrawal_id}
-👤 User: @{wd_data.get('username', 'N/A')}
-💰 Amount: ₹{wd_data.get('amount', 0)}
-
-Send rejection reason:"""
-            
-            buttons = [("❌ Cancel", f"admin_withdrawals")]
-            keyboard = self.generate_keyboard(buttons, 1)
-            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-            return
-        
-        buttons = [("💳 Back to Withdrawals", "admin_withdrawals")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def process_rejection_reason(self, admin_id, reason):
-        if admin_id not in self.user_states:
-            return
-        
-        state = self.user_states[admin_id]
-        if state.get("state") != "awaiting_rejection_reason":
-            return
-        
-        withdrawal_id = state["withdrawal_id"]
-        user_id = state["user_id"]
-        amount = state["amount"]
-        
-        self.db.update_withdrawal_status(withdrawal_id, "rejected", f"Rejected: {reason}")
-        
-        user = self.db.get_user(user_id)
-        if user:
-            new_balance = user.get("pending_balance", 0) + amount
-            self.db.update_user(user_id, {"pending_balance": new_balance})
-        
-        user_msg = f"""❌ <b>Withdrawal Rejected</b>
-
-💰 Amount: <b>₹{amount}</b>
-📋 ID: <code>{withdrawal_id}</code>
-📝 Reason: {reason}
-
-Amount returned to balance."""
-        
-        self.bot.send_message(user_id, user_msg)
-        
-        msg = f"""❌ <b>Withdrawal Rejected</b>
-
-🆔 {withdrawal_id}
-👤 User notified
-💰 ₹{amount} returned
-📝 Reason: {reason}"""
-        
-        buttons = [("💳 Back to Withdrawals", "admin_withdrawals")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        
-        self.bot.edit_message_text(
-            state["chat_id"], 
-            state["message_id"], 
-            msg, 
-            keyboard
-        )
-        
-        del self.user_states[admin_id]
-    
-    def show_user_management(self, chat_id, message_id, user_id):
-        users = self.db.get_all_users()
-        
-        if not users:
-            msg = "👥 <b>No Users</b>\n\nNo users yet."
-        else:
-            msg = "👥 <b>Top 10 Users</b>\n\n"
-            
-            sorted_users = sorted(
-                [(uid, data) for uid, data in users.items() if data],
-                key=lambda x: x[1].get("total_earnings", 0),
-                reverse=True
-            )[:10]
-            
-            for i, (uid, data) in enumerate(sorted_users, 1):
-                username = data.get("username", "N/A")
-                earnings = data.get("total_earnings", 0)
-                referrals = data.get("referrals", 0)
-                verified = "✅" if data.get("is_verified") else "❌"
-                
-                msg += f"{i}. {verified} @{username}\n   💰 ₹{earnings} | 👥 {referrals}\n"
-        
-        buttons = [("🔄 Refresh", "admin_users"), ("🔙 Back", "admin_panel")]
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_broadcast_menu(self, chat_id, message_id, user_id):
-        msg = """📢 <b>Broadcast Message</b>
-
-Use /broadcast command:
-
-<code>/broadcast Your message here</code>
-
-Example:
-<code>/broadcast New update available!</code>"""
-        
-        buttons = [("🔙 Back", "admin_panel")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
     def handle_info_callback(self, chat_id, message_id, user_id, callback):
         if callback == "how_it_works":
             msg = f"""📢 <b>How It Works</b>
 
-1️⃣ <b>Join Channels</b> (If Required)
+1️⃣ <b>Accept Terms & Conditions</b>
+   Must agree to continue
+
+2️⃣ <b>Join Channels</b> (If Required)
    Complete verification first
 
-2️⃣ <b>Get Referral Link</b>
+3️⃣ <b>Get Referral Link</b>
    Share with friends
 
-3️⃣ <b>Earn Money</b>
+4️⃣ <b>Earn Money</b>
    Get ₹{Config.REWARD_PER_REFERRAL} per referral
 
-4️⃣ <b>Setup UPI & Withdraw</b>
+5️⃣ <b>Setup UPI & Withdraw</b>
    Minimum ₹{Config.MINIMUM_WITHDRAWAL} to withdraw"""
         
         elif callback == "rewards":
@@ -1340,6 +1320,7 @@ Example:
             msg = f"""📞 <b>Support</b>
 
 Channel: {Config.SUPPORT_CHANNEL}
+Admin: @AdminUsername
 
 We're here to help!"""
         
@@ -1436,12 +1417,15 @@ You can now request withdrawals."""
                 
                 self.bot.send_message(chat_id, f"✅ Sent: {success}/{total} users")
     
-    def run(self):
+    # ... (rest of the methods remain the same as before)
+
+    def run_bot(self):
+        """Run the Telegram bot (separate thread)"""
         print("🤖 Trade Genius Bot Started!")
         print(f"👑 Admin ID: {Config.ADMIN_USER_ID}")
         print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
-        print(f"💰 Minimum Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
-        print("📱 Running on Pydroid 3")
+        print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
+        print("📱 Running with Flask Server")
         print("="*50)
         
         self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
@@ -1484,31 +1468,33 @@ You can now request withdrawals."""
                 
                 time.sleep(0.3)
                 
-# ==================== START BOT ====================
+            except KeyboardInterrupt:
+                print("\n🛑 Bot stopped")
+                self.running = False
+                
+            except Exception as e:
+                print(f"❌ Error: {e}")
+                time.sleep(5)
+
+# ==================== START BOTH SERVERS ====================
+def run_both():
+    """Run both Flask server and Telegram bot"""
+    bot = TradeGeniusBot()
+    
+    # Start Flask server in a separate thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # Start Telegram bot in main thread
+    bot.run_bot()
+
 if __name__ == "__main__":
     print("🔥 Trade Genius Bot Starting...")
     print(f"👑 Admin: {Config.ADMIN_USER_ID}")
     print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
     print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
-
+    
     if Config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("❌ Configure bot token first!")
     else:
-        import threading
-        from flask import Flask
-        import os
-
-        bot = TradeGeniusBot()
-
-        # 🔥 BOT THREAD
-        threading.Thread(target=bot.run, daemon=True).start()
-
-        # 🌐 RENDER PORT BIND
-        app = Flask(__name__)
-
-        @app.route("/")
-        def home():
-            return "✅ Trade Genius Bot is running"
-
-        port = int(os.environ.get("PORT", 8080))
-        app.run(host="0.0.0.0", port=port)
+        run_both()
