@@ -19,8 +19,8 @@ from urllib.parse import urlencode, quote
 # ==================== CONFIGURATION ====================
 class Config:
     # 🔧 YOUR BOT CREDENTIALS
-    BOT_TOKEN = "8271744231:AAFkzZGHp_hUCI_50eECr5RdC_78oJMcOQs"
-    BOT_USERNAME = "TradeGenius07_Files_bot"
+    BOT_TOKEN = "8285080906:AAHEfKnYLeW_ygtgtqgzbbLfbaMJGRuSEgM"
+    BOT_USERNAME = "TradeGenius07Pro_bot"
     
     # 🔥 FIREBASE CONFIGURATION
     FIREBASE_URL = "https://colortraderpro-panel-default-rtdb.firebaseio.com/"
