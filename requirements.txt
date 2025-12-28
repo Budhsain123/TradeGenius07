@@ -1,5 +1,0 @@
-pyrogram
-tgcrypto
-firebase-admin
-flask
-python-dotenv
