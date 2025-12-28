@@ -1,11 +1,12 @@
-# main.py - Fixed Errors and Improved Verification Screen
+# main.py - Fixed Errors with Open Web Button and UPI/Mono Form
+
 """
-🔥 Trade Genius Bot - FIXED Errors and Better UI
-✅ Fixed Channel Verification Errors
-✅ Better Verification Screen with Only Buttons
-✅ Admin No Verification
-✅ 20₹ Minimum Withdrawal
-✅ 2₹ Per Referral
+🔥 Trade Genius Bot - UPDATED Version
+✅ Open Web Button added
+✅ Admin can change Web URL
+✅ UPI ID/Mono Form in withdrawals
+✅ Fixed Channel Verification
+✅ Better Verification Screen
 """
 
 import os
@@ -43,6 +44,7 @@ def run_flask():
 class Config:
     BOT_TOKEN = "8285080906:AAHEfKnYLeW_ygtgtqgzbbLfbaMJGRuSEgM"
     BOT_USERNAME = "TradeGenius07Pro_bot"
+    WEB_URL = "https://traderjoebot.com"  # Default web URL
     
     FIREBASE_URL = "https://colortraderpro-panel-default-rtdb.firebaseio.com/"
     
@@ -50,7 +52,7 @@ class Config:
     MINIMUM_WITHDRAWAL = 20
     BONUS_AT_10_REFERRALS = 5
     
-    ADMIN_USER_ID = "1882237415"
+    ADMIN_USER_ID = "6608445090"
     SUPPORT_CHANNEL = "@TradeGenius07_HelpCenter_bot"
     
     LOG_FILE = "bot_logs.txt"
@@ -101,7 +103,8 @@ class FirebaseDB:
             "channels": {},
             "settings": {
                 "reward_per_referral": Config.REWARD_PER_REFERRAL,
-                "minimum_withdrawal": Config.MINIMUM_WITHDRAWAL
+                "minimum_withdrawal": Config.MINIMUM_WITHDRAWAL,
+                "web_url": Config.WEB_URL  # 🆕 Store web URL
             }
         }
     
@@ -123,6 +126,22 @@ class FirebaseDB:
         except Exception as e:
             print(f"❌ Firebase Error: {e}")
             return None
+    
+    # 🆕 Web URL Methods
+    def update_web_url(self, new_url):
+        """Admin द्वारा web URL update करने के लिए"""
+        data = {"web_url": new_url}
+        result = self._firebase_request("PATCH", "settings", data)
+        
+        if result:
+            self.local_data["settings"]["web_url"] = new_url
+            self._save_local_backup()
+        return result
+    
+    def get_web_url(self):
+        """Firebase से web URL प्राप्त करें"""
+        settings = self._firebase_request("GET", "settings") or {}
+        return settings.get("web_url", Config.WEB_URL)
     
     def get_user(self, user_id):
         user_id = str(user_id)
@@ -152,7 +171,9 @@ class FirebaseDB:
             "referrer": None,
             "referral_claimed": False,
             "upi_id": "",
-            "is_verified": is_admin,  # Admin auto verified
+            "phone": "",  # 🆕 For Mono form
+            "email": "",  # 🆕 For Mono form
+            "is_verified": is_admin,
             "channels_joined": {},
             "created_at": datetime.now().isoformat(),
             "last_active": datetime.now().isoformat(),
@@ -294,9 +315,7 @@ class TelegramBotAPI:
             return None
     
     def get_chat_member(self, chat_id, user_id):
-        # FIXED: Handle both channel usernames and IDs
         try:
-            # Try with the chat_id as provided
             data = {
                 "chat_id": chat_id,
                 "user_id": user_id
@@ -306,7 +325,6 @@ class TelegramBotAPI:
             if result:
                 return result
             
-            # If failed, try with @ prefix removed
             if chat_id.startswith("@"):
                 chat_id_without_at = chat_id[1:]
                 data["chat_id"] = chat_id_without_at
@@ -401,6 +419,7 @@ class TradeGeniusBot:
         
         return {"inline_keyboard": keyboard}
     
+    # 🆕 Open Web Button Added
     def get_main_menu_buttons(self, user_id):
         is_admin = (str(user_id) == Config.ADMIN_USER_ID)
         
@@ -408,6 +427,7 @@ class TradeGeniusBot:
             ("🔗 Get Referral Link", "my_referral"),
             ("📊 My Dashboard", "dashboard"),
             ("💳 Withdraw", "withdraw"),
+            ("🌐 Open Web", "open_web"),  # 🆕 NEW BUTTON
             ("📜 Terms & Conditions", "terms_conditions"),
             ("📢 How It Works", "how_it_works"),
             ("🎁 Rewards", "rewards"),
@@ -448,7 +468,6 @@ class TradeGeniusBot:
         self.bot.edit_message_text(chat_id, message_id, terms_text, keyboard)
     
     def start_command(self, chat_id, user_id, username, args):
-        """FIXED: ALWAYS check verification on /start"""
         user = self.db.get_user(user_id)
         
         if not user:
@@ -459,29 +478,22 @@ class TradeGeniusBot:
             if not user.get("is_verified", False):
                 self.db.update_user(user_id, {"is_verified": True})
             user["is_verified"] = True
-            # Admin के लिए direct access
             self.show_welcome_screen(chat_id, user_id, username, user, args)
             return
         
-        # 🚨 IMPORTANT: हर बार REAL-TIME CHECK
-        # पहले check करें कि channels हैं या नहीं
         channels = self.db.get_channels()
         
         if not channels:
-            # कोई channels नहीं हैं, auto verify
             if not user.get("is_verified", False):
                 self.db.mark_user_verified(user_id)
                 user["is_verified"] = True
             
-            # Now process referral if user is verified
             if args and len(args) > 0 and user.get("is_verified", False):
                 self.process_referral(user_id, username, args[0])
             
-            # Show welcome screen
             self.show_welcome_screen(chat_id, user_id, username, user, args)
             return
         
-        # 🚨 REAL-TIME VERIFICATION CHECK - हर बार /start पर
         all_joined = True
         not_joined_channels = []
         
@@ -492,24 +504,19 @@ class TradeGeniusBot:
                 continue
             
             try:
-                # FIXED: Proper channel link handling
                 chat_id_for_check = channel_link
                 
-                # Remove @ if present for checking
                 if channel_link.startswith("@"):
                     chat_id_for_check = channel_link
                 elif channel_link.isdigit() or (channel_link.startswith('-100') and channel_link[1:].isdigit()):
-                    # It's a numeric channel ID
                     chat_id_for_check = channel_link
                 else:
-                    # Try with @ prefix
                     if not channel_link.startswith("@"):
                         chat_id_for_check = "@" + channel_link
                 
                 member_info = self.bot.get_chat_member(chat_id_for_check, user_id)
                 
                 if member_info and member_info.get("status") in ["member", "administrator", "creator"]:
-                    # Mark as joined
                     if "channels_joined" not in user:
                         user["channels_joined"] = {}
                     user["channels_joined"][channel_id] = {
@@ -535,31 +542,23 @@ class TradeGeniusBot:
                 })
         
         if all_joined:
-            # सभी channels join किए हैं
             if not user.get("is_verified", False):
                 self.db.mark_user_verified(user_id)
                 user["is_verified"] = True
             
-            # Now process referral
             if args and len(args) > 0 and user.get("is_verified", False):
                 self.process_referral(user_id, username, args[0])
             
-            # Show welcome screen
             self.show_welcome_screen(chat_id, user_id, username, user, args)
         else:
-            # सभी channels join नहीं किए हैं
-            # Show verification screen
             self.show_verification_screen_real_time(chat_id, user_id, username, not_joined_channels)
     
     def show_verification_screen_real_time(self, chat_id, user_id, username, missing_channels):
-        """FIXED: Better verification screen with only buttons"""
         if not missing_channels:
-            # Auto verify if no missing channels
             self.db.mark_user_verified(user_id)
             self.show_welcome_screen(chat_id, user_id, username, None, [])
             return
         
-        # NEW: Clean message with only essential info
         msg = "🔐 <b>Join our channels to continue</b>"
         
         buttons = []
@@ -568,37 +567,31 @@ class TradeGeniusBot:
             channel_name = channel.get("name", "Channel")
             channel_link = channel.get("link", "")
             
-            # Create proper Telegram URL
             if channel_link.startswith("@"):
                 channel_url = f"https://t.me/{channel_link[1:]}"
             elif channel_link.isdigit() or (channel_link.startswith('-100') and channel_link[1:].isdigit()):
-                # For numeric channel IDs, we can't create direct link
-                channel_url = f"https://t.me/{Config.SUPPORT_CHANNEL[1:]}"  # Use support channel as fallback
+                channel_url = f"https://t.me/{Config.SUPPORT_CHANNEL[1:]}"
             elif "t.me/" in channel_link:
                 channel_url = channel_link
             else:
                 channel_url = f"https://t.me/{channel_link}"
             
-            # Clean channel name (remove emojis if needed)
             clean_name = channel_name.replace("📢", "").replace("🔔", "").replace("📰", "").strip()
             if not clean_name:
                 clean_name = "Join Channel"
             
             buttons.append({"text": f"📢 {clean_name}", "url": channel_url})
         
-        # Single "✅ Verify Join" button in full width
         buttons.append(("✅ VERIFY JOIN ✅", "check_verification"))
         
-        keyboard = self.generate_keyboard(buttons, 1)  # 1 column for all buttons
+        keyboard = self.generate_keyboard(buttons, 1)
         self.bot.send_message(chat_id, msg, keyboard)
     
     def process_referral(self, user_id, username, referral_code):
-        """Process referral code if not already claimed"""
         user = self.db.get_user(user_id)
         if not user or user.get("referral_claimed", False):
             return
         
-        # Find referrer by code
         all_users = self.db.get_all_users()
         referrer_id = None
         
@@ -608,11 +601,10 @@ class TradeGeniusBot:
                 break
         
         if referrer_id and referrer_id != str(user_id):
-            # Update referrer stats
             referrer = self.db.get_user(referrer_id)
             if referrer and referrer.get("is_verified", False):
                 new_refs = referrer.get("referrals", 0) + 1
-                reward = Config.REWARD_PER_REFERRAL  # 2₹
+                reward = Config.REWARD_PER_REFERRAL
                 
                 if new_refs == 10:
                     reward += Config.BONUS_AT_10_REFERRALS
@@ -623,7 +615,6 @@ class TradeGeniusBot:
                     "total_earnings": referrer.get("total_earnings", 0) + reward
                 })
                 
-                # Notify referrer
                 self.bot.send_message(
                     referrer_id,
                     f"""🎉 <b>New Referral!</b>
@@ -635,18 +626,15 @@ class TradeGeniusBot:
 Keep sharing to earn more!"""
                 )
                 
-                # Mark user as referred
                 self.db.update_user(user_id, {
                     "referrer": referrer_id,
                     "referral_claimed": True
                 })
     
     def check_verification(self, chat_id, message_id, user_id):
-        """Check if user has joined all channels - REAL-TIME"""
         channels = self.db.get_channels()
         
         if not channels:
-            # No channels required, auto verify
             self.db.mark_user_verified(user_id)
             self.show_verification_success(chat_id, message_id, user_id)
             return
@@ -666,7 +654,6 @@ Keep sharing to earn more!"""
                 continue
             
             try:
-                # FIXED: Proper channel ID handling
                 chat_id_for_check = channel_link
                 
                 if channel_link.startswith("@"):
@@ -697,7 +684,6 @@ Keep sharing to earn more!"""
             self.show_verification_failed(chat_id, message_id, user_id, not_joined_channels)
     
     def show_verification_success(self, chat_id, message_id, user_id):
-        """Show verification success"""
         user = self.db.get_user(user_id)
         username = user.get("username", "User") if user else "User"
         
@@ -719,8 +705,6 @@ Welcome to <b>Trade Genius</b>, @{username}!
         self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def show_verification_failed(self, chat_id, message_id, user_id, missing_channels):
-        """FIXED: Better failed verification screen"""
-        # Simple message
         msg = "❌ <b>Please join all channels first</b>"
         
         channels = self.db.get_channels()
@@ -731,12 +715,10 @@ Welcome to <b>Trade Genius</b>, @{username}!
                 channel_link = channel.get("link", "")
                 channel_name = channel.get("name", "Channel")
                 
-                # Clean channel name
                 clean_name = channel_name.replace("📢", "").replace("🔔", "").replace("📰", "").strip()
                 if not clean_name:
                     clean_name = "Join Channel"
                 
-                # Create URL
                 if channel_link.startswith("@"):
                     channel_url = f"https://t.me/{channel_link[1:]}"
                 elif "t.me/" in channel_link:
@@ -746,21 +728,18 @@ Welcome to <b>Trade Genius</b>, @{username}!
                 
                 buttons.append({"text": f"📢 {clean_name}", "url": channel_url})
         
-        # Single "✅ VERIFY JOIN ✅" button
         buttons.append(("✅ VERIFY JOIN ✅", "check_verification"))
         
-        keyboard = self.generate_keyboard(buttons, 1)  # All buttons in single column
+        keyboard = self.generate_keyboard(buttons, 1)
         self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def show_welcome_screen(self, chat_id, user_id, username, user, args):
-        """Show welcome screen after verification"""
         if not user:
             user = self.db.get_user(user_id)
         
         if not user:
             user = self.db.create_user(user_id, username)
         
-        # Welcome message
         is_admin = (str(user_id) == Config.ADMIN_USER_ID)
         admin_text = "\n👑 <b>Admin Status: Active</b>" if is_admin else ""
         verified_text = "\n✅ <b>Status: Verified</b>" if user.get("is_verified", False) else "\n❌ <b>Status: Not Verified</b>"
@@ -789,21 +768,33 @@ Welcome to <b>Trade Genius</b>, @{username}!
         
         user = self.db.get_user(user_id) or {}
         
-        # Handle Terms & Conditions first
         if callback == "terms_conditions":
             self.show_terms_conditions(chat_id, message_id, user_id)
             return
         
-        # Check admin access
+        # 🆕 Handle Open Web
+        if callback == "open_web":
+            web_url = self.db.get_web_url()
+            buttons = [
+                {"text": "🌐 Open Website", "url": web_url},
+                ("🏠 Main Menu", "main_menu")
+            ]
+            keyboard = self.generate_keyboard(buttons, 2)
+            msg = f"""🌐 <b>Open Website</b>
+
+Click the button below to visit our website:
+
+{web_url}"""
+            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+            return
+        
         if callback == "admin_panel" and str(user_id) != Config.ADMIN_USER_ID:
             msg = "⛔ <b>Access Denied</b>"
             keyboard = self.generate_keyboard([("🏠 Main Menu", "main_menu")], 1)
             self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
             return
         
-        # Check verification for non-admin users
         if str(user_id) != Config.ADMIN_USER_ID and not user.get("is_verified", False):
-            # Allow only verification-related callbacks
             if callback not in ["check_verification", "refresh_verification", "main_menu"]:
                 msg = """❌ <b>Verification Required</b>
 
@@ -812,7 +803,7 @@ Please complete verification first to access bot features.
 Join all required channels and verify."""
                 keyboard = self.generate_keyboard([
                     ("✅ VERIFY JOIN ✅", "check_verification")
-                ], 1)  # Single button
+                ], 1)
                 self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
                 return
         
@@ -821,7 +812,6 @@ Join all required channels and verify."""
             self.check_verification(chat_id, message_id, user_id)
         
         elif callback == "refresh_verification":
-            # Simply call check verification
             self.check_verification(chat_id, message_id, user_id)
         
         elif callback == "main_menu":
@@ -897,6 +887,8 @@ Share with friends and earn!"""
 👤 @{user.get('username', 'User')}
 🔗 Code: <code>{user.get('referral_code', 'N/A')}</code>
 📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>
+📞 Phone: {user.get('phone', 'Not set')}
+📧 Email: {user.get('email', 'Not set')}
 🔄 Status: <b>{verified_status}</b>
 
 📈 <b>Statistics:</b>
@@ -930,7 +922,7 @@ Minimum withdrawal: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>"""
             buttons = [
                 ("📱 Setup UPI ID", "setup_upi"),
                 ("📊 Dashboard", "dashboard"),
-                ("📜 History", "withdraw_history"),  # 🆕 ALWAYS SHOW
+                ("📜 History", "withdraw_history"),
                 ("🏠 Main Menu", "main_menu")
             ]
         
@@ -940,6 +932,8 @@ Minimum withdrawal: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>"""
 💰 Available: <b>₹{pending}</b>
 💰 Minimum: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>
 📱 Your UPI: <code>{upi_id}</code>
+📞 Phone: {user.get('phone', 'Not set')}
+📧 Email: {user.get('email', 'Not set')}
 
 🏦 <b>Payment Method:</b>
 • UPI Only (Google Pay, PhonePe, Paytm)
@@ -949,7 +943,7 @@ Minimum withdrawal: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>"""
             buttons = [
                 ("✅ Request Withdrawal", "request_withdraw"),
                 ("✏️ Change UPI", "setup_upi"),
-                ("📜 History", "withdraw_history"),  # 🆕 ALWAYS SHOW
+                ("📜 History", "withdraw_history"),
                 ("🏠 Main Menu", "main_menu")
             ]
         else:
@@ -967,7 +961,7 @@ Minimum withdrawal: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>"""
             buttons = [
                 ("🔗 Referral Link", "my_referral"),
                 ("📊 Dashboard", "dashboard"),
-                ("📜 History", "withdraw_history"),  # 🆕 ALWAYS SHOW
+                ("📜 History", "withdraw_history"),
                 ("🏠 Main Menu", "main_menu")
             ]
         
@@ -1015,14 +1009,19 @@ Send your UPI ID in this format:
         
         withdrawal_id = f"WD{random.randint(100000, 999999)}"
         
+        # 🆕 UPI/Mono Form Data
         withdrawal_data = {
             "user_id": str(user_id),
             "username": user.get("username", ""),
             "amount": pending,
             "upi_id": upi_id,
+            "phone": user.get("phone", ""),  # 🆕 Phone number for Mono
+            "email": user.get("email", ""),  # 🆕 Email for Mono
+            "payment_method": "upi",  # Default
             "status": "pending",
             "requested_at": datetime.now().isoformat(),
-            "withdrawal_id": withdrawal_id
+            "withdrawal_id": withdrawal_id,
+            "form_type": "upi/mono"  # 🆕 Form type indicator
         }
         
         self.db.create_withdrawal(withdrawal_id, withdrawal_data)
@@ -1032,14 +1031,17 @@ Send your UPI ID in this format:
             "withdrawn": user.get("withdrawn", 0) + pending
         })
         
-        # Notify admin
+        # 🆕 IMPROVED Admin Notification with UPI/Mono Form
         admin_msg = f"""🆕 <b>WITHDRAWAL REQUEST</b>
 
 👤 User: @{user.get('username', 'N/A')}
 💰 Amount: <b>₹{pending}</b>
-📱 UPI: <code>{upi_id}</code>
+📱 UPI ID: <code>{upi_id}</code>
+📞 Phone: {user.get('phone', 'N/A')}
+📧 Email: {user.get('email', 'N/A')}
 📋 ID: {withdrawal_id}
 ⏰ Time: {datetime.now().strftime('%H:%M %d/%m')}
+📄 Form Type: UPI/Mono Form
 
 Click /admin to manage."""
         
@@ -1130,12 +1132,15 @@ Payment within 24 hours."""
         channels = self.db.get_channels()
         total_channels = len(channels) if channels else 0
         
+        web_url = self.db.get_web_url()
+        
         msg = f"""👑 <b>Admin Control Panel</b>
 
 📊 <b>Stats:</b>
 👥 Users: {total_users}
 💳 Pending WD: {pending_withdrawals}
 📢 Channels: {total_channels}
+🌐 Web URL: {web_url[:30]}...
 
 👇 <b>Select:</b>"""
         
@@ -1143,6 +1148,7 @@ Payment within 24 hours."""
             ("📊 Statistics", "admin_stats"),
             ("💳 Withdrawals", "admin_withdrawals"),
             ("📢 Channels", "admin_channels"),
+            ("🌐 Web URL", "admin_web_url"),  # 🆕 NEW OPTION
             ("👥 Users", "admin_users"),
             ("📢 Broadcast", "admin_broadcast"),
             ("🏠 Main Menu", "main_menu")
@@ -1160,6 +1166,10 @@ Payment within 24 hours."""
         
         elif callback == "admin_channels":
             self.show_channel_management(chat_id, message_id, user_id)
+        
+        # 🆕 Handle Web URL Management
+        elif callback == "admin_web_url":
+            self.show_web_url_management(chat_id, message_id, user_id)
         
         elif callback == "admin_users":
             self.show_user_management(chat_id, message_id, user_id)
@@ -1184,6 +1194,51 @@ Payment within 24 hours."""
         elif callback.startswith("admin_reject_"):
             wd_id = callback.replace("admin_reject_", "")
             self.reject_withdrawal(chat_id, message_id, user_id, wd_id)
+        
+        # 🆕 Handle Web URL Update
+        elif callback == "admin_update_web_url":
+            self.show_update_web_url(chat_id, message_id, user_id)
+    
+    # 🆕 Web URL Management Methods
+    def show_web_url_management(self, chat_id, message_id, user_id):
+        web_url = self.db.get_web_url()
+        
+        msg = f"""🌐 <b>Web URL Management</b>
+
+Current Web URL:
+<code>{web_url}</code>
+
+Click below to update the web URL."""
+        
+        buttons = [
+            ("✏️ Update Web URL", "admin_update_web_url"),
+            ("🔙 Back", "admin_panel")
+        ]
+        
+        keyboard = self.generate_keyboard(buttons, 2)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+    
+    def show_update_web_url(self, chat_id, message_id, user_id):
+        current_url = self.db.get_web_url()
+        
+        msg = f"""✏️ <b>Update Web URL</b>
+
+Current: <code>{current_url}</code>
+
+Send new web URL:
+Example: <code>https://example.com</code>
+
+⚠️ Must start with https://"""
+        
+        self.user_states[user_id] = {
+            "state": "awaiting_web_url",
+            "chat_id": chat_id,
+            "message_id": message_id
+        }
+        
+        buttons = [("❌ Cancel", "admin_web_url")]
+        keyboard = self.generate_keyboard(buttons, 1)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def show_admin_stats(self, chat_id, message_id, user_id):
         users = self.db.get_all_users()
@@ -1194,6 +1249,8 @@ Payment within 24 hours."""
         
         channels = self.db.get_channels()
         total_channels = len(channels) if channels else 0
+        
+        web_url = self.db.get_web_url()
         
         msg = f"""📊 <b>Admin Statistics</b>
 
@@ -1209,7 +1266,10 @@ Payment within 24 hours."""
 
 📢 <b>Channels:</b>
 • Total: {total_channels}
-• Verification: {'Required' if total_channels > 0 else 'Not Required'}"""
+• Verification: {'Required' if total_channels > 0 else 'Not Required'}
+
+🌐 <b>Web URL:</b>
+• {web_url}"""
         
         buttons = [("🔄 Refresh", "admin_stats"), ("🔙 Back", "admin_panel")]
         keyboard = self.generate_keyboard(buttons, 2)
@@ -1230,10 +1290,14 @@ Payment within 24 hours."""
                     username = wd_data.get("username", "N/A")
                     amount = wd_data.get("amount", 0)
                     upi_id = wd_data.get("upi_id", "N/A")
+                    phone = wd_data.get("phone", "N/A")
+                    email = wd_data.get("email", "N/A")
                     date = datetime.fromisoformat(wd_data["requested_at"]).strftime("%d/%m %H:%M")
                     
                     msg += f"{i}. ₹{amount} - @{username}\n"
-                    msg += f"   📱 {upi_id}\n"
+                    msg += f"   📱 UPI: {upi_id}\n"
+                    msg += f"   📞 Phone: {phone}\n"
+                    msg += f"   📧 Email: {email}\n"
                     msg += f"   📅 {date}\n\n"
                     
                     buttons.append((f"✅ Approve {i}", f"admin_approve_{wd_id}"))
@@ -1345,16 +1409,19 @@ channel_id</code>
         else:
             self.db.update_withdrawal_status(withdrawal_id, "completed", f"Approved by admin {user_id}")
             
+            # 🆕 Detailed user notification
             user_msg = f"""✅ <b>Withdrawal Approved!</b>
 
 💰 Amount: <b>₹{wd_data['amount']}</b>
 📋 ID: <code>{withdrawal_id}</code>
 📱 UPI: <code>{wd_data.get('upi_id', 'N/A')}</code>
+📞 Phone: {wd_data.get('phone', 'N/A')}
+📧 Email: {wd_data.get('email', 'N/A')}
 
-Payment processed successfully!"""
+Payment processed successfully! Funds will reach you within 24 hours."""
             
             self.bot.send_message(wd_data["user_id"], user_msg)
-            msg = f"✅ Withdrawal {withdrawal_id} approved."
+            msg = f"✅ Withdrawal {withdrawal_id} approved.\n\nUser notified."
         
         buttons = [("💳 Back to Withdrawals", "admin_withdrawals")]
         keyboard = self.generate_keyboard(buttons, 1)
@@ -1385,6 +1452,8 @@ Payment processed successfully!"""
 🆔 {withdrawal_id}
 👤 User: @{wd_data.get('username', 'N/A')}
 💰 Amount: ₹{wd_data.get('amount', 0)}
+📱 UPI: {wd_data.get('upi_id', 'N/A')}
+📞 Phone: {wd_data.get('phone', 'N/A')}
 
 Send rejection reason:"""
         
@@ -1417,7 +1486,8 @@ Send rejection reason:"""
 📋 ID: <code>{withdrawal_id}</code>
 📝 Reason: {reason}
 
-Amount returned to balance."""
+Amount returned to your balance.
+Contact support if you have questions."""
         
         self.bot.send_message(user_id, user_msg)
         
@@ -1582,6 +1652,29 @@ You can now request withdrawals."""
             
             elif state.get("state") == "awaiting_rejection_reason":
                 self.process_rejection_reason(user_id, text)
+            
+            # 🆕 Handle Web URL Update
+            elif state.get("state") == "awaiting_web_url":
+                new_url = text.strip()
+                
+                if new_url.startswith("http://") or new_url.startswith("https://"):
+                    result = self.db.update_web_url(new_url)
+                    
+                    if result:
+                        msg = f"""✅ <b>Web URL Updated</b>
+
+New URL: <code>{new_url}</code>
+
+The "Open Web" button will now use this URL."""
+                    else:
+                        msg = "❌ Failed to update web URL."
+                else:
+                    msg = "❌ Invalid URL. Must start with http:// or https://"
+                
+                buttons = [("🌐 Back to Web URL", "admin_web_url")]
+                keyboard = self.generate_keyboard(buttons, 1)
+                self.bot.send_message(chat_id, msg, keyboard)
+                del self.user_states[user_id]
         
         elif text.startswith("/broadcast") and str(user_id) == Config.ADMIN_USER_ID:
             parts = text.split(maxsplit=1)
@@ -1612,9 +1705,11 @@ You can now request withdrawals."""
         print(f"👑 Admin ID: {Config.ADMIN_USER_ID}")
         print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
         print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
-        print("📱 Running on Render with Flask Server")
+        print(f"🌐 Web URL: {self.db.get_web_url()}")
         print("✅ FIXED: Channel verification errors")
-        print("✅ IMPROVED: Clean verification screen")
+        print("✅ ADDED: Open Web button")
+        print("✅ ADDED: Admin can change Web URL")
+        print("✅ ADDED: UPI/Mono Form in withdrawals")
         print("="*50)
         
         self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
@@ -1684,8 +1779,9 @@ if __name__ == "__main__":
     print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
     print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
     print("✅ FIXED: Channel verification errors")
-    print("✅ IMPROVED: Clean verification screen with buttons only")
-    print("✅ REMOVED: Long text from verification screen")
+    print("✅ ADDED: Open Web button in main menu")
+    print("✅ ADDED: Admin can change Web URL")
+    print("✅ IMPROVED: UPI/Mono Form in withdrawal requests")
     print("="*50)
     
     if Config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
