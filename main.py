@@ -1,11 +1,12 @@
-# main.py - Fixed HTTP 409 Conflict Error
+# main.py - AI Button with Admin Update Feature
 
 """
-🔥 Trade Genius Bot - FIXED Version
-✅ Fixed HTTP 409 Conflict Error
-✅ Webhook properly disabled
-✅ Get Free Coins button
+🔥 Trade Genius Bot - AI Button Added
+✅ AI Button added (Open Web)
+✅ Admin can change Button Name
 ✅ Admin can change Web URL
+✅ Fixed HTTP 409 Error
+✅ UPI/Mono Form in withdrawals
 """
 
 import os
@@ -44,6 +45,7 @@ class Config:
     BOT_TOKEN = "8285080906:AAHEfKnYLeW_ygtgtqgzbbLfbaMJGRuSEgM"
     BOT_USERNAME = "TradeGenius07Pro_bot"
     WEB_URL = "https://www.thecoinsage.com/"
+    AI_BUTTON_NAME = "🤖 AI Chat"  # 🆕 Default AI button name
     
     FIREBASE_URL = "https://colortraderpro-panel-default-rtdb.firebaseio.com/"
     
@@ -109,7 +111,8 @@ class FirebaseDB:
             "settings": {
                 "reward_per_referral": Config.REWARD_PER_REFERRAL,
                 "minimum_withdrawal": Config.MINIMUM_WITHDRAWAL,
-                "web_url": Config.WEB_URL
+                "web_url": Config.WEB_URL,
+                "ai_button_name": Config.AI_BUTTON_NAME  # 🆕 Store AI button name
             }
         }
     
@@ -131,6 +134,22 @@ class FirebaseDB:
         except Exception as e:
             print(f"❌ Firebase Error: {e}")
             return None
+    
+    # 🆕 AI Button Name Methods
+    def update_ai_button_name(self, new_name):
+        """Admin द्वारा AI button name update करने के लिए"""
+        data = {"ai_button_name": new_name}
+        result = self._firebase_request("PATCH", "settings", data)
+        
+        if result:
+            self.local_data["settings"]["ai_button_name"] = new_name
+            self._save_local_backup()
+        return result
+    
+    def get_ai_button_name(self):
+        """Firebase से AI button name प्राप्त करें"""
+        settings = self._firebase_request("GET", "settings") or {}
+        return settings.get("ai_button_name", Config.AI_BUTTON_NAME)
     
     def update_web_url(self, new_url):
         data = {"web_url": new_url}
@@ -314,7 +333,6 @@ class TelegramBotAPI:
         except urllib.error.HTTPError as e:
             if e.code == 409:
                 self.logger.warning(f"API 409 Conflict ({method}) - Retrying...")
-                # Retry after 2 seconds
                 time.sleep(2)
                 return None
             self.logger.error(f"API Error {e.code} ({method}): {e}")
@@ -392,10 +410,10 @@ class TelegramBotAPI:
         
         return self._api_request("answerCallbackQuery", data)
     
-    def get_updates(self, offset=None, timeout=60):  # 🛠️ Increased timeout
+    def get_updates(self, offset=None, timeout=60):
         data = {
             "timeout": timeout,
-            "allowed_updates": ["message", "callback_query"]  # 🛠️ Specify allowed updates
+            "allowed_updates": ["message", "callback_query"]
         }
         if offset:
             data["offset"] = offset
@@ -404,7 +422,6 @@ class TelegramBotAPI:
         return result or []
     
     def check_webhook_status(self):
-        """Check if webhook is active"""
         return self._api_request("getWebhookInfo")
 
 # ==================== MAIN BOT CLASS ====================
@@ -435,14 +452,18 @@ class TradeGeniusBot:
         
         return {"inline_keyboard": keyboard}
     
+    # 🆕 Get AI button name from Firebase
     def get_main_menu_buttons(self, user_id):
         is_admin = (str(user_id) == Config.ADMIN_USER_ID)
+        
+        # Get AI button name from Firebase
+        ai_button_name = self.db.get_ai_button_name()
         
         buttons = [
             ("🔗 Get Referral Link", "my_referral"),
             ("📊 My Dashboard", "dashboard"),
             ("💳 Withdraw", "withdraw"),
-            ("🪙 Web Url", "open_web"),
+            (ai_button_name, "open_web"),  # 🆕 Dynamic AI button name
             ("📜 Terms & Conditions", "terms_conditions"),
             ("📢 How It Works", "how_it_works"),
             ("🎁 Rewards", "rewards"),
@@ -786,16 +807,19 @@ Welcome to <b>Trade Genius</b>, @{username}!
             self.show_terms_conditions(chat_id, message_id, user_id)
             return
         
+        # 🆕 Handle Open Web with dynamic button name
         if callback == "open_web":
             web_url = self.db.get_web_url()
+            ai_button_name = self.db.get_ai_button_name()
+            
             buttons = [
-                {"text": "🪙 Open Web", "url": web_url},
+                {"text": ai_button_name, "url": web_url},  # 🆕 Dynamic button text
                 ("🏠 Main Menu", "main_menu")
             ]
             keyboard = self.generate_keyboard(buttons, 2)
-            msg = f"""🪙 <b></b>
+            msg = f"""🤖 <b>AI Assistant</b>
 
-"""
+Click the button below to access AI features:"""
             self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
             return
         
@@ -1119,12 +1143,16 @@ Payment within 24 hours."""
         admin_text = "\n👑 <b>Admin Mode</b>" if is_admin else ""
         verified_text = "\n✅ <b>Verified</b>" if user.get("is_verified", False) else "\n❌ <b>Not Verified</b>"
         
+        # Get current AI button name
+        ai_button_name = self.db.get_ai_button_name()
+        
         msg = f"""🏠 <b>Main Menu</b>{admin_text}{verified_text}
 
 👋 @{user.get('username', 'User')}
 💰 Balance: <b>₹{user.get('pending_balance', 0)}</b>
 👥 Referrals: <b>{user.get('referrals', 0)}</b>
-📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>"""
+📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>
+🤖 AI Button: {ai_button_name}"""  # 🆕 Show current AI button name
         
         buttons = self.get_main_menu_buttons(user_id)
         keyboard = self.generate_keyboard(buttons, 2)
@@ -1141,6 +1169,7 @@ Payment within 24 hours."""
         total_channels = len(channels) if channels else 0
         
         web_url = self.db.get_web_url()
+        ai_button_name = self.db.get_ai_button_name()
         
         msg = f"""👑 <b>Admin Control Panel</b>
 
@@ -1149,14 +1178,16 @@ Payment within 24 hours."""
 💳 Pending WD: {pending_withdrawals}
 📢 Channels: {total_channels}
 🌐 Web URL: {web_url[:30]}...
+🤖 AI Button: {ai_button_name}
 
-👇 <b>Select:</b>"""
+👇 <b>Select:</b>"""  # 🆕 Show AI button name
         
         buttons = [
             ("📊 Statistics", "admin_stats"),
             ("💳 Withdrawals", "admin_withdrawals"),
             ("📢 Channels", "admin_channels"),
             ("🌐 Web URL", "admin_web_url"),
+            ("🤖 AI Button", "admin_ai_button"),  # 🆕 NEW OPTION
             ("👥 Users", "admin_users"),
             ("📢 Broadcast", "admin_broadcast"),
             ("🏠 Main Menu", "main_menu")
@@ -1177,6 +1208,10 @@ Payment within 24 hours."""
         
         elif callback == "admin_web_url":
             self.show_web_url_management(chat_id, message_id, user_id)
+        
+        # 🆕 Handle AI Button Management
+        elif callback == "admin_ai_button":
+            self.show_ai_button_management(chat_id, message_id, user_id)
         
         elif callback == "admin_users":
             self.show_user_management(chat_id, message_id, user_id)
@@ -1204,6 +1239,56 @@ Payment within 24 hours."""
         
         elif callback == "admin_update_web_url":
             self.show_update_web_url(chat_id, message_id, user_id)
+        
+        # 🆕 Handle AI Button Update
+        elif callback == "admin_update_ai_button":
+            self.show_update_ai_button(chat_id, message_id, user_id)
+    
+    # 🆕 AI Button Management Methods
+    def show_ai_button_management(self, chat_id, message_id, user_id):
+        ai_button_name = self.db.get_ai_button_name()
+        web_url = self.db.get_web_url()
+        
+        msg = f"""🤖 <b>AI Button Management</b>
+
+Current AI Button Name:
+<code>{ai_button_name}</code>
+
+Current Web URL:
+<code>{web_url}</code>
+
+Click below to update AI button name."""
+        
+        buttons = [
+            ("✏️ Update Button Name", "admin_update_ai_button"),
+            ("🌐 Update Web URL", "admin_update_web_url"),
+            ("🔙 Back", "admin_panel")
+        ]
+        
+        keyboard = self.generate_keyboard(buttons, 2)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+    
+    def show_update_ai_button(self, chat_id, message_id, user_id):
+        current_name = self.db.get_ai_button_name()
+        
+        msg = f"""✏️ <b>Update AI Button Name</b>
+
+Current: <code>{current_name}</code>
+
+Send new AI button name:
+Example: <code>🤖 AI Chat</code> or <code>🚀 Open AI</code>
+
+⚠️ Max 20 characters, include emoji for better look."""
+        
+        self.user_states[user_id] = {
+            "state": "awaiting_ai_button_name",
+            "chat_id": chat_id,
+            "message_id": message_id
+        }
+        
+        buttons = [("❌ Cancel", "admin_ai_button")]
+        keyboard = self.generate_keyboard(buttons, 1)
+        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
     
     def show_web_url_management(self, chat_id, message_id, user_id):
         web_url = self.db.get_web_url()
@@ -1256,6 +1341,7 @@ Example: <code>https://example.com</code>
         total_channels = len(channels) if channels else 0
         
         web_url = self.db.get_web_url()
+        ai_button_name = self.db.get_ai_button_name()
         
         msg = f"""📊 <b>Admin Statistics</b>
 
@@ -1274,7 +1360,10 @@ Example: <code>https://example.com</code>
 • Verification: {'Required' if total_channels > 0 else 'Not Required'}
 
 🌐 <b>Web URL:</b>
-• {web_url}"""
+• {web_url}
+
+🤖 <b>AI Button:</b>
+• {ai_button_name}"""  # 🆕 Show AI button info
         
         buttons = [("🔄 Refresh", "admin_stats"), ("🔙 Back", "admin_panel")]
         keyboard = self.generate_keyboard(buttons, 2)
@@ -1668,13 +1757,37 @@ You can now request withdrawals."""
 
 New URL: <code>{new_url}</code>
 
-The "Open Web" button will now use this URL."""
+The AI button will now use this URL."""
                     else:
                         msg = "❌ Failed to update web URL."
                 else:
                     msg = "❌ Invalid URL. Must start with http:// or https://"
                 
                 buttons = [("🌐 Back to Web URL", "admin_web_url")]
+                keyboard = self.generate_keyboard(buttons, 1)
+                self.bot.send_message(chat_id, msg, keyboard)
+                del self.user_states[user_id]
+            
+            # 🆕 Handle AI Button Name Update
+            elif state.get("state") == "awaiting_ai_button_name":
+                new_name = text.strip()
+                
+                if len(new_name) <= 20 and len(new_name) > 0:
+                    result = self.db.update_ai_button_name(new_name)
+                    
+                    if result:
+                        msg = f"""✅ <b>AI Button Name Updated</b>
+
+New Name: <code>{new_name}</code>
+
+The AI button in main menu will now show this name.
+It will update for all users immediately."""
+                    else:
+                        msg = "❌ Failed to update AI button name."
+                else:
+                    msg = "❌ Invalid name. Must be 1-20 characters."
+                
+                buttons = [("🤖 Back to AI Button", "admin_ai_button")]
                 keyboard = self.generate_keyboard(buttons, 1)
                 self.bot.send_message(chat_id, msg, keyboard)
                 del self.user_states[user_id]
@@ -1703,62 +1816,55 @@ The "Open Web" button will now use this URL."""
                 
                 self.bot.send_message(chat_id, f"✅ Sent: {success}/{total} users")
     
-    # 🛠️ FIXED: Proper webhook handling
     def run_bot(self):
-        print("🤖 Trade Genius Bot Starting...")
+        print("🤖 Trade Genius Bot Started!")
         print(f"👑 Admin ID: {Config.ADMIN_USER_ID}")
         
-        # 🛠️ IMPORTANT: Disable webhook completely
+        # Disable webhook
         print("🔄 Disabling webhook...")
-        
-        # First check webhook status
         webhook_info = self.bot._api_request("getWebhookInfo")
         if webhook_info:
             print(f"ℹ️ Current webhook: {webhook_info.get('url', 'None')}")
         
-        # Delete webhook with pending updates
         delete_result = self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
         if delete_result:
             print("✅ Webhook disabled successfully")
         else:
             print("⚠️ Could not disable webhook, trying again...")
-            # Try again
             self.bot._api_request("deleteWebhook", {})
         
-        # Wait a bit
         time.sleep(2)
         
-        # Verify webhook is disabled
         webhook_info = self.bot._api_request("getWebhookInfo")
         if webhook_info and webhook_info.get("url"):
             print(f"⚠️ Webhook still active: {webhook_info.get('url')}")
-            # Force delete
             self.bot._api_request("deleteWebhook", {})
         else:
             print("✅ Webhook confirmed disabled")
         
+        # Get current settings
+        web_url = self.db.get_web_url()
+        ai_button_name = self.db.get_ai_button_name()
+        
         print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
         print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
-        print(f"🌐 Web URL: {self.db.get_web_url()}")
+        print(f"🌐 Web URL: {web_url}")
+        print(f"🤖 AI Button Name: {ai_button_name}")
         print("✅ FIXED: HTTP 409 Conflict Error")
-        print("✅ ADDED: 'Get Free Coins' button")
+        print("✅ ADDED: AI Button with Admin Update")
         print("="*50)
         
-        # Start polling
         self.offset = 0
         error_count = 0
         
         while self.running:
             try:
-                # 🛠️ Get updates with error handling
                 updates = self.bot.get_updates(self.offset)
                 
                 if updates is None:
-                    # 409 error occurred, wait and retry
                     error_count += 1
                     if error_count > 5:
                         print("🔄 Too many errors, re-initializing bot...")
-                        # Try to disable webhook again
                         self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
                         error_count = 0
                         time.sleep(5)
@@ -1766,7 +1872,6 @@ The "Open Web" button will now use this URL."""
                         time.sleep(2)
                     continue
                 
-                # Reset error count on success
                 error_count = 0
                 
                 if updates and isinstance(updates, list):
@@ -1801,7 +1906,6 @@ The "Open Web" button will now use this URL."""
                             
                             self.handle_callback(chat_id, message_id, user_id, cb)
                 
-                # Small delay between polls
                 time.sleep(0.5)
                 
             except KeyboardInterrupt:
@@ -1814,7 +1918,6 @@ The "Open Web" button will now use this URL."""
                 if error_count > 10:
                     print("🔴 Too many errors, restarting bot...")
                     time.sleep(10)
-                    # Reset offset to avoid old updates
                     self.offset = 0
                     error_count = 0
                 else:
@@ -1834,7 +1937,7 @@ def run_both():
 
 # ==================== START BOT ====================
 if __name__ == "__main__":
-    print("🔥 Trade Genius Bot - FIXED VERSION")
+    print("🔥 Trade Genius Bot - AI Button Version")
     print("="*50)
     
     if Config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
