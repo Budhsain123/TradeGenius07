@@ -1,12 +1,11 @@
-# main.py - Fixed Errors with Open Web Button and UPI/Mono Form
+# main.py - Fixed HTTP 409 Conflict Error
 
 """
-🔥 Trade Genius Bot - UPDATED Version
-✅ Open Web Button added with updated text
+🔥 Trade Genius Bot - FIXED Version
+✅ Fixed HTTP 409 Conflict Error
+✅ Webhook properly disabled
+✅ Get Free Coins button
 ✅ Admin can change Web URL
-✅ UPI ID/Mono Form in withdrawals
-✅ Fixed Channel Verification
-✅ Better Verification Screen
 """
 
 import os
@@ -44,7 +43,7 @@ def run_flask():
 class Config:
     BOT_TOKEN = "8285080906:AAHEfKnYLeW_ygtgtqgzbbLfbaMJGRuSEgM"
     BOT_USERNAME = "TradeGenius07Pro_bot"
-    WEB_URL = "https://www.thecoinsage.com/"  # 🆕 Updated default web URL
+    WEB_URL = "https://www.thecoinsage.com/"
     
     FIREBASE_URL = "https://colortraderpro-panel-default-rtdb.firebaseio.com/"
     
@@ -76,6 +75,12 @@ class HTTPHelper:
             response = urllib.request.urlopen(req, timeout=timeout)
             return json.loads(response.read().decode('utf-8'))
             
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                print(f"⚠️ HTTP 409 Conflict: {e}")
+                return None
+            print(f"HTTP Error {e.code}: {e}")
+            return None
         except Exception as e:
             print(f"HTTP Error: {e}")
             return None
@@ -127,9 +132,7 @@ class FirebaseDB:
             print(f"❌ Firebase Error: {e}")
             return None
     
-    # 🆕 Web URL Methods
     def update_web_url(self, new_url):
-        """Admin द्वारा web URL update करने के लिए"""
         data = {"web_url": new_url}
         result = self._firebase_request("PATCH", "settings", data)
         
@@ -139,7 +142,6 @@ class FirebaseDB:
         return result
     
     def get_web_url(self):
-        """Firebase से web URL प्राप्त करें"""
         settings = self._firebase_request("GET", "settings") or {}
         return settings.get("web_url", Config.WEB_URL)
     
@@ -157,7 +159,6 @@ class FirebaseDB:
         
         referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
         
-        # Check if user is admin
         is_admin = (user_id == Config.ADMIN_USER_ID)
         
         user_data = {
@@ -310,6 +311,14 @@ class TelegramBotAPI:
                 result = json.loads(response.read().decode('utf-8'))
                 return result.get('result') if result.get('ok') else None
                 
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                self.logger.warning(f"API 409 Conflict ({method}) - Retrying...")
+                # Retry after 2 seconds
+                time.sleep(2)
+                return None
+            self.logger.error(f"API Error {e.code} ({method}): {e}")
+            return None
         except Exception as e:
             self.logger.error(f"API Error ({method}): {e}")
             return None
@@ -383,13 +392,20 @@ class TelegramBotAPI:
         
         return self._api_request("answerCallbackQuery", data)
     
-    def get_updates(self, offset=None, timeout=30):
-        data = {"timeout": timeout}
+    def get_updates(self, offset=None, timeout=60):  # 🛠️ Increased timeout
+        data = {
+            "timeout": timeout,
+            "allowed_updates": ["message", "callback_query"]  # 🛠️ Specify allowed updates
+        }
         if offset:
             data["offset"] = offset
         
         result = self._api_request("getUpdates", data)
         return result or []
+    
+    def check_webhook_status(self):
+        """Check if webhook is active"""
+        return self._api_request("getWebhookInfo")
 
 # ==================== MAIN BOT CLASS ====================
 class TradeGeniusBot:
@@ -419,7 +435,6 @@ class TradeGeniusBot:
         
         return {"inline_keyboard": keyboard}
     
-    # 🆕 Open Web Button with updated text
     def get_main_menu_buttons(self, user_id):
         is_admin = (str(user_id) == Config.ADMIN_USER_ID)
         
@@ -427,7 +442,7 @@ class TradeGeniusBot:
             ("🔗 Get Referral Link", "my_referral"),
             ("📊 My Dashboard", "dashboard"),
             ("💳 Withdraw", "withdraw"),
-            ("🪙 Get Free Coins", "open_web"),  # 🆕 UPDATED BUTTON TEXT
+            ("🪙 Web Url", "open_web"),
             ("📜 Terms & Conditions", "terms_conditions"),
             ("📢 How It Works", "how_it_works"),
             ("🎁 Rewards", "rewards"),
@@ -473,7 +488,6 @@ class TradeGeniusBot:
         if not user:
             user = self.db.create_user(user_id, username)
         
-        # Check if admin - always verified
         if str(user_id) == Config.ADMIN_USER_ID:
             if not user.get("is_verified", False):
                 self.db.update_user(user_id, {"is_verified": True})
@@ -772,17 +786,16 @@ Welcome to <b>Trade Genius</b>, @{username}!
             self.show_terms_conditions(chat_id, message_id, user_id)
             return
         
-        # 🆕 Handle Open Web with simple message
         if callback == "open_web":
             web_url = self.db.get_web_url()
             buttons = [
-                {"text": "🪙 Get Free Coins Now", "url": web_url},
+                {"text": "🪙 Open Web", "url": web_url},
                 ("🏠 Main Menu", "main_menu")
             ]
             keyboard = self.generate_keyboard(buttons, 2)
-            msg = f"""🪙 <b>Get Free Coins</b>
+            msg = f"""🪙 <b></b>
 
-Click the button below to claim free coins:"""
+"""
             self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
             return
         
@@ -805,7 +818,6 @@ Join all required channels and verify."""
                 self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
                 return
         
-        # Handle callbacks
         if callback == "check_verification":
             self.check_verification(chat_id, message_id, user_id)
         
@@ -1007,7 +1019,6 @@ Send your UPI ID in this format:
         
         withdrawal_id = f"WD{random.randint(100000, 999999)}"
         
-        # UPI/Mono Form Data
         withdrawal_data = {
             "user_id": str(user_id),
             "username": user.get("username", ""),
@@ -1029,7 +1040,6 @@ Send your UPI ID in this format:
             "withdrawn": user.get("withdrawn", 0) + pending
         })
         
-        # IMPROVED Admin Notification with UPI/Mono Form
         admin_msg = f"""🆕 <b>WITHDRAWAL REQUEST</b>
 
 👤 User: @{user.get('username', 'N/A')}
@@ -1195,7 +1205,6 @@ Payment within 24 hours."""
         elif callback == "admin_update_web_url":
             self.show_update_web_url(chat_id, message_id, user_id)
     
-    # Web URL Management Methods
     def show_web_url_management(self, chat_id, message_id, user_id):
         web_url = self.db.get_web_url()
         
@@ -1659,7 +1668,7 @@ You can now request withdrawals."""
 
 New URL: <code>{new_url}</code>
 
-The "Get Free Coins" button will now use this URL."""
+The "Open Web" button will now use this URL."""
                     else:
                         msg = "❌ Failed to update web URL."
                 else:
@@ -1694,23 +1703,71 @@ The "Get Free Coins" button will now use this URL."""
                 
                 self.bot.send_message(chat_id, f"✅ Sent: {success}/{total} users")
     
+    # 🛠️ FIXED: Proper webhook handling
     def run_bot(self):
-        print("🤖 Trade Genius Bot Started!")
+        print("🤖 Trade Genius Bot Starting...")
         print(f"👑 Admin ID: {Config.ADMIN_USER_ID}")
+        
+        # 🛠️ IMPORTANT: Disable webhook completely
+        print("🔄 Disabling webhook...")
+        
+        # First check webhook status
+        webhook_info = self.bot._api_request("getWebhookInfo")
+        if webhook_info:
+            print(f"ℹ️ Current webhook: {webhook_info.get('url', 'None')}")
+        
+        # Delete webhook with pending updates
+        delete_result = self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
+        if delete_result:
+            print("✅ Webhook disabled successfully")
+        else:
+            print("⚠️ Could not disable webhook, trying again...")
+            # Try again
+            self.bot._api_request("deleteWebhook", {})
+        
+        # Wait a bit
+        time.sleep(2)
+        
+        # Verify webhook is disabled
+        webhook_info = self.bot._api_request("getWebhookInfo")
+        if webhook_info and webhook_info.get("url"):
+            print(f"⚠️ Webhook still active: {webhook_info.get('url')}")
+            # Force delete
+            self.bot._api_request("deleteWebhook", {})
+        else:
+            print("✅ Webhook confirmed disabled")
+        
         print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
         print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
         print(f"🌐 Web URL: {self.db.get_web_url()}")
-        print("✅ FIXED: Channel verification errors")
+        print("✅ FIXED: HTTP 409 Conflict Error")
         print("✅ ADDED: 'Get Free Coins' button")
-        print("✅ ADDED: Admin can change Web URL")
-        print("✅ ADDED: UPI/Mono Form in withdrawals")
         print("="*50)
         
-        self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
+        # Start polling
+        self.offset = 0
+        error_count = 0
         
         while self.running:
             try:
+                # 🛠️ Get updates with error handling
                 updates = self.bot.get_updates(self.offset)
+                
+                if updates is None:
+                    # 409 error occurred, wait and retry
+                    error_count += 1
+                    if error_count > 5:
+                        print("🔄 Too many errors, re-initializing bot...")
+                        # Try to disable webhook again
+                        self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
+                        error_count = 0
+                        time.sleep(5)
+                    else:
+                        time.sleep(2)
+                    continue
+                
+                # Reset error count on success
+                error_count = 0
                 
                 if updates and isinstance(updates, list):
                     for update in updates:
@@ -1744,15 +1801,24 @@ The "Get Free Coins" button will now use this URL."""
                             
                             self.handle_callback(chat_id, message_id, user_id, cb)
                 
-                time.sleep(0.3)
+                # Small delay between polls
+                time.sleep(0.5)
                 
             except KeyboardInterrupt:
-                print("\n🛑 Bot stopped")
+                print("\n🛑 Bot stopped by user")
                 self.running = False
                 
             except Exception as e:
-                print(f"❌ Error: {e}")
-                time.sleep(5)
+                print(f"❌ Unexpected Error: {e}")
+                error_count += 1
+                if error_count > 10:
+                    print("🔴 Too many errors, restarting bot...")
+                    time.sleep(10)
+                    # Reset offset to avoid old updates
+                    self.offset = 0
+                    error_count = 0
+                else:
+                    time.sleep(5)
 
 # ==================== START BOTH SERVERS ====================
 def run_both():
@@ -1768,14 +1834,7 @@ def run_both():
 
 # ==================== START BOT ====================
 if __name__ == "__main__":
-    print("🔥 Trade Genius Bot Starting...")
-    print(f"👑 Admin: {Config.ADMIN_USER_ID}")
-    print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
-    print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
-    print("✅ FIXED: Channel verification errors")
-    print("✅ ADDED: 'Get Free Coins' button in main menu")
-    print("✅ ADDED: Admin can change Web URL")
-    print("✅ IMPROVED: UPI/Mono Form in withdrawal requests")
+    print("🔥 Trade Genius Bot - FIXED VERSION")
     print("="*50)
     
     if Config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
