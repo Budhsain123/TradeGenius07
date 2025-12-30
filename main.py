@@ -53,7 +53,7 @@ class Config:
     MINIMUM_WITHDRAWAL = 20
     BONUS_AT_10_REFERRALS = 5
     
-    ADMIN_USER_ID = "6608445090"
+    ADMIN_USER_ID = "1882237415"
     SUPPORT_CHANNEL = "@TradeGenius07_HelpCenter_bot"
     
     LOG_FILE = "bot_logs.txt"
@@ -863,7 +863,7 @@ Keep sharing to earn more!"""
         
         msg = f"""✅ <b>Verification Successful!</b>
 
-Welcome to <b>Trade Genius</b>, @{username}!
+Welcome to <b>TradeGenius07 Bot</b>, @{username}!
 
 🎉 You can now start earning <b>₹{Config.REWARD_PER_REFERRAL}</b> per referral.
 
@@ -920,7 +920,7 @@ If already joined, wait a moment and try again."""
         elif user.get("referral_claimed", False):
             referral_status = "\n✅ Referral already claimed"
         
-        welcome_msg = f"""👋 <b>Welcome to Trade Genius Bot!</b> 💸
+        welcome_msg = f"""👋 <b>Welcome to TradeGenius07 Bot!</b> 💸
 
 👤 Hello, {user.get('username', 'User')}!{admin_text}{verified_text}{referral_status}
 
@@ -1045,7 +1045,7 @@ Join all required channels and verify."""
 
 Share with friends and earn!"""
         
-        share_text = f"Join Trade Genius bot and earn money! {referral_link}"
+        share_text = f"Join TradeGenius07 bot and earn money! {referral_link}"
         share_url = f"https://t.me/share/url?url={quote(referral_link)}&text={quote(share_text)}"
         
         buttons = [
@@ -1597,7 +1597,7 @@ Send channel details in this format:
 channel_id</code>
 
 <b>Example:</b>
-<code>Trade Genius Official
+<code>JOIN
 @TradeGenius07
 -1001234567890</code>
 
