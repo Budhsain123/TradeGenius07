@@ -1072,8 +1072,6 @@ Share with friends and earn!"""
 👤 {user.get('username', 'User')}
 🔗 Code: <code>{user.get('referral_code', 'N/A')}</code>
 📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>
-📞 Phone: {user.get('phone', 'Not set')}
-📧 Email: {user.get('email', 'Not set')}
 🔄 Status: <b>{verified_status}</b>{referral_info}
 
 📈 <b>Statistics:</b>
@@ -1302,7 +1300,7 @@ Payment within 24 hours."""
 💰 Balance: <b>₹{user.get('pending_balance', 0)}</b>
 👥 Referrals: <b>{user.get('referrals', 0)}</b>
 📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>
-🤖 AI Button: {ai_button_name}"""
+"""
         
         buttons = self.get_main_menu_buttons(user_id)
         keyboard = self.generate_keyboard(buttons, 2)
@@ -1541,14 +1539,10 @@ Example: <code>https://example.com</code>
                     username = wd_data.get("username", "N/A")
                     amount = wd_data.get("amount", 0)
                     upi_id = wd_data.get("upi_id", "N/A")
-                    phone = wd_data.get("phone", "N/A")
-                    email = wd_data.get("email", "N/A")
                     date = datetime.fromisoformat(wd_data["requested_at"]).strftime("%d/%m %H:%M")
                     
                     msg += f"{i}. ₹{amount} - @{username}\n"
                     msg += f"   📱 UPI: {upi_id}\n"
-                    msg += f"   📞 Phone: {phone}\n"
-                    msg += f"   📧 Email: {email}\n"
                     msg += f"   📅 {date}\n\n"
                     
                     buttons.append((f"✅ Approve {i}", f"admin_approve_{wd_id}"))
@@ -1665,8 +1659,6 @@ channel_id</code>
 💰 Amount: <b>₹{wd_data['amount']}</b>
 📋 ID: <code>{withdrawal_id}</code>
 📱 UPI: <code>{wd_data.get('upi_id', 'N/A')}</code>
-📞 Phone: {wd_data.get('phone', 'N/A')}
-📧 Email: {wd_data.get('email', 'N/A')}
 
 Payment processed successfully! Funds will reach you within 24 hours."""
             
