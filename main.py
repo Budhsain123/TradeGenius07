@@ -515,7 +515,74 @@ class TradeGeniusBot:
         self.running = True
         self.offset = 0
         self.user_states = {}
-        self.pending_referrals = {}  # 🆕 NEW: Track pending referrals
+        self.pending_referrals = {}
+    
+    def get_display_name(self, user_data, user_id):
+        """Get proper display name for user"""
+        username = user_data.get('username', 'User')
+        user_id_str = str(user_id)
+        
+        # Check for invalid usernames
+        invalid_names = ["User", "@User", "User_None", "None", "", None]
+        
+        if username in invalid_names:
+            first_name = user_data.get('first_name', '')
+            last_name = user_data.get('last_name', '')
+            
+            if first_name:
+                display_name = first_name
+                if last_name:
+                    display_name += f" {last_name}"
+            else:
+                display_name = f"User_{user_id_str[-6:]}"
+        else:
+            display_name = username
+        
+        return display_name
+    
+    # फिर सभी स्थानों पर इसका उपयोग करें:
+    def show_welcome_screen(self, chat_id, user_id, user, args):
+        if not user:
+            user = self.db.get_user(user_id)
+        
+        if not user:
+            return
+        
+        is_admin = (str(user_id) == Config.ADMIN_USER_ID)
+        admin_text = "\n👑 <b>Admin Status: Active</b>" if is_admin else ""
+        verified_text = "\n✅ <b>Status: Verified</b>" if user.get("is_verified", False) else "\n❌ <b>Status: Not Verified</b>"
+        
+        # 🆕 FIX: Use proper display name
+        display_name = self.get_display_name(user, user_id)
+        
+        # 🆕 FIX: Show referral status
+        referral_status = ""
+        if user.get("referrer"):
+            # Get referrer's name
+            referrer = self.db.get_user(user['referrer'])
+            if referrer:
+                referrer_name = self.get_display_name(referrer, user['referrer'])
+                referral_status = f"\n👥 Referred by: {referrer_name}"
+            else:
+                referral_status = f"\n👥 Referred by: User_{user['referrer'][-6:]}"
+        elif user.get("referral_claimed", False):
+            referral_status = "\n✅ Referral already claimed"
+        
+        welcome_msg = f"""👋 <b>Welcome to TradeGenius07 Bot!</b> 💸
+
+👤 Hello, {display_name}!{admin_text}{verified_text}{referral_status}
+
+💰 Earn <b>₹{Config.REWARD_PER_REFERRAL}</b> per referral
+🔗 Your Code: <code>{user.get('referral_code', 'N/A')}</code>
+👥 Referrals: {user.get('referrals', 0)}
+💸 Balance: ₹{user.get('pending_balance', 0)}
+
+👇 <b>Select an option:</b>"""
+        
+        buttons = self.get_main_menu_buttons(user_id)
+        keyboard = self.generate_keyboard(buttons, 2)
+        
+        self.bot.send_message(chat_id, welcome_msg, keyboard)
     
     def generate_keyboard(self, buttons, columns=2):
         keyboard = []
