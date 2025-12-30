@@ -518,27 +518,20 @@ class TradeGeniusBot:
         self.pending_referrals = {}
     
     def get_display_name(self, user_data, user_id):
-        """Get proper display name for user"""
-        username = user_data.get('username', 'User')
-        user_id_str = str(user_id)
-        
-        # Check for invalid usernames
-        invalid_names = ["User", "@User", "User_None", "None", "", None]
-        
-        if username in invalid_names:
-            first_name = user_data.get('first_name', '')
-            last_name = user_data.get('last_name', '')
-            
-            if first_name:
-                display_name = first_name
-                if last_name:
-                    display_name += f" {last_name}"
-            else:
-                display_name = f"User_{user_id_str[-6:]}"
-        else:
-            display_name = username
-        
-        return display_name
+    username = user_data.get("username")
+    first_name = user_data.get("first_name", "")
+    last_name = user_data.get("last_name", "")
+
+    # agar username hai
+    if username and username.lower() != "user":
+        return f"@{username}"
+
+    # agar username nahi hai, name use karo
+    if first_name:
+        return f"{first_name} {last_name}".strip()
+
+    # last fallback
+    return f"User_{str(user_id)[-6:]}"
     
     # फिर सभी स्थानों पर इसका उपयोग करें:
     def show_welcome_screen(self, chat_id, user_id, user, args):
