@@ -1301,8 +1301,8 @@ Click /admin to manage."""
 💰 Amount: <b>₹{pending}</b>
 📅 Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 🔄 Status: <b>Pending</b>
-
-Payment within 24 hours."""
+⏳ Payouts Are Processed Within 24–72 Hours
+🏦 Payouts Are Not Processed On Public And Bank Holidays."""
         
         buttons = [
             ("📜 Check Status", "withdraw_history"),
