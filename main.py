@@ -1,2170 +1,588 @@
-# main.py - Fixed Referral System with Channel Verification
+# main.py - Optimized Trade Genius Bot
 
-"""
-🔥 Trade Genius Bot - FIXED REFERRAL SYSTEM
-✅ Channel join verification FIXED
-✅ Anonymous user handling FIXED  
-✅ Referral system timing FIXED
-✅ No username user support ADDED
-✅ Referral count logic CORRECTED
-✅ SIMPLIFIED CHANNEL ADD - ONLY NAME & USERNAME
-"""
-
-import os
-import json
-import logging
-import time
-import random
-import string
-from datetime import datetime, timedelta
-from urllib.parse import urlencode, quote
-
-# ==================== FLASK SERVER FOR RENDER ====================
+import os, json, logging, time, random, string, threading, urllib.request, urllib.error
+from datetime import datetime
+from urllib.parse import quote
 from flask import Flask, jsonify
-import threading
 
 app = Flask(__name__)
 
 @app.route('/')
-def home():
-    return jsonify({
-        "status": "online",
-        "bot": "TradeGeniusBot",
-        "message": "Telegram bot is running"
-    })
+def home(): return jsonify({"status": "online", "bot": "TradeGeniusBot"})
 
 @app.route('/health')
-def health():
-    return jsonify({"status": "healthy"})
+def health(): return jsonify({"status": "healthy"})
 
 def run_flask():
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False, use_reloader=False)
 
-# ==================== CONFIGURATION ====================
 class Config:
     BOT_TOKEN = "8560550222:AAFYTkiQMa_ElkH1dBKhKdGUceKs9R5p9Xk"
     BOT_USERNAME = "TradeGenius07RewardsHub_bot"
     WEB_URL = "https://www.nextwin.great-site.net/"
     AI_BUTTON_NAME = "🤖 AI Chat"
-    
     FIREBASE_URL = "https://colortraderpro-panel-default-rtdb.firebaseio.com/"
-    
     REWARD_PER_REFERRAL = 2
     MINIMUM_WITHDRAWAL = 20
     BONUS_AT_10_REFERRALS = 5
-    
     ADMIN_USER_ID = "1882237415"
     SUPPORT_CHANNEL = "@TradeGenius07_HelpCenter_bot"
-    
-    LOG_FILE = "bot_logs.txt"
     DATA_FILE = "local_backup.json"
-    
-    # 🆕 NEW: Referral verification settings
-    REFERRAL_VERIFICATION_DELAY = 2  # seconds
-    MAX_VERIFICATION_ATTEMPTS = 3
-
-# ==================== HTTP HELPER ====================
-import urllib.request
-import urllib.error
 
 class HTTPHelper:
     @staticmethod
-    def make_request(url, method="GET", data=None, headers=None, timeout=30):
+    def request(url, method="GET", data=None, timeout=30):
         try:
-            if headers is None:
-                headers = {'Content-Type': 'application/json'}
-            
-            if data and isinstance(data, dict):
-                data = json.dumps(data, ensure_ascii=False).encode('utf-8')
-            
+            headers = {'Content-Type': 'application/json'}
+            if data and isinstance(data, dict): data = json.dumps(data, ensure_ascii=False).encode('utf-8')
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
-            response = urllib.request.urlopen(req, timeout=timeout)
-            return json.loads(response.read().decode('utf-8'))
-            
+            return json.loads(urllib.request.urlopen(req, timeout=timeout).read().decode('utf-8'))
         except urllib.error.HTTPError as e:
-            if e.code == 409:
-                print(f"⚠️ HTTP 409 Conflict: {e}")
-                return None
-            print(f"HTTP Error {e.code}: {e}")
+            if e.code != 409: print(f"HTTP Error {e.code}: {e}")
             return None
         except Exception as e:
             print(f"HTTP Error: {e}")
             return None
 
-# ==================== FIREBASE HELPER ====================
 class FirebaseDB:
     def __init__(self):
-        self.base_url = Config.FIREBASE_URL
-        if not self.base_url.endswith('/'):
-            self.base_url += '/'
-        print(f"🔥 Firebase URL: {self.base_url}")
-        self.local_data = self._load_local_backup()
+        self.base_url = Config.FIREBASE_URL.rstrip('/') + '/'
+        self.local = self._load_backup()
     
-    def _load_local_backup(self):
+    def _load_backup(self):
         try:
             if os.path.exists(Config.DATA_FILE):
-                with open(Config.DATA_FILE, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except:
-            pass
-        return {
-            "users": {}, 
-            "withdrawals": {}, 
-            "referrals": {},
-            "channels": {},
-            "settings": {
-                "reward_per_referral": Config.REWARD_PER_REFERRAL,
-                "minimum_withdrawal": Config.MINIMUM_WITHDRAWAL,
-                "web_url": Config.WEB_URL,
-                "ai_button_name": Config.AI_BUTTON_NAME
-            },
-            "referral_attempts": {}  # 🆕 NEW: Track referral attempts
-        }
+                with open(Config.DATA_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+        except: pass
+        return {"users": {}, "withdrawals": {}, "referrals": {}, "channels": {}, 
+                "settings": {"reward_per_referral": Config.REWARD_PER_REFERRAL, "minimum_withdrawal": Config.MINIMUM_WITHDRAWAL, 
+                            "web_url": Config.WEB_URL, "ai_button_name": Config.AI_BUTTON_NAME}}
     
-    def _save_local_backup(self):
+    def _save(self):
         try:
-            with open(Config.DATA_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.local_data, f, indent=2, ensure_ascii=False)
-        except:
-            pass
+            with open(Config.DATA_FILE, 'w', encoding='utf-8') as f: json.dump(self.local, f, indent=2, ensure_ascii=False)
+        except: pass
     
-    def _firebase_request(self, method, path, data=None):
-        try:
-            if path.startswith('/'):
-                path = path[1:]
-            
-            url = self.base_url + path + ".json"
-            return HTTPHelper.make_request(url, method, data)
-            
-        except Exception as e:
-            print(f"❌ Firebase Error: {e}")
-            return None
+    def _req(self, method, path, data=None):
+        try: return HTTPHelper.request(self.base_url + path.lstrip('/') + ".json", method, data)
+        except: return None
     
-    # 🆕 NEW: Referral tracking methods
-    def track_referral_attempt(self, user_id, referral_code, status):
-        """Track referral attempts for debugging"""
-        key = f"{user_id}_{referral_code}"
-        data = {
-            "user_id": str(user_id),
-            "referral_code": referral_code,
-            "status": status,
-            "timestamp": datetime.now().isoformat(),
-            "attempts": self.get_referral_attempts(user_id, referral_code) + 1
-        }
-        
-        result = self._firebase_request("PUT", f"referral_attempts/{key}", data)
-        
-        if "referral_attempts" not in self.local_data:
-            self.local_data["referral_attempts"] = {}
-        self.local_data["referral_attempts"][key] = data
-        self._save_local_backup()
-        
+    def get_setting(self, key, default=None):
+        settings = self._req("GET", "settings") or {}
+        return settings.get(key, default)
+    
+    def set_setting(self, key, value):
+        result = self._req("PATCH", "settings", {key: value})
+        if result: self.local.setdefault("settings", {})[key] = value; self._save()
         return result
     
-    def get_referral_attempts(self, user_id, referral_code):
-        """Get number of referral attempts"""
-        key = f"{user_id}_{referral_code}"
-        if "referral_attempts" in self.local_data:
-            attempts = self.local_data["referral_attempts"].get(key, {})
-            return attempts.get("attempts", 0)
-        return 0
+    def get_user(self, uid):
+        uid = str(uid)
+        return self._req("GET", f"users/{uid}") or self.local.get('users', {}).get(uid)
     
-    def get_successful_referrals(self, referrer_id):
-        """Get successful referrals for a referrer"""
-        referrals = self._firebase_request("GET", "referrals") or {}
-        successful = []
-        
-        for ref_id, ref_data in referrals.items():
-            if ref_data and ref_data.get("referrer_id") == str(referrer_id) and ref_data.get("status") == "completed":
-                successful.append(ref_data)
-        
-        return successful
-    
-    def create_referral_record(self, new_user_id, referrer_id, status="pending"):
-        """Create a referral record"""
-        referral_id = f"REF{new_user_id}_{int(time.time())}"
-        
-        referral_data = {
-            "new_user_id": str(new_user_id),
-            "referrer_id": str(referrer_id),
-            "status": status,
-            "created_at": datetime.now().isoformat(),
-            "reward_amount": Config.REWARD_PER_REFERRAL if status == "completed" else 0,
-            "verified": status == "completed"
-        }
-        
-        result = self._firebase_request("PUT", f"referrals/{referral_id}", referral_data)
-        return result
-    
-    # Existing methods with fixes
-    def update_ai_button_name(self, new_name):
-        data = {"ai_button_name": new_name}
-        result = self._firebase_request("PATCH", "settings", data)
-        
-        if result:
-            self.local_data["settings"]["ai_button_name"] = new_name
-            self._save_local_backup()
-        return result
-    
-    def get_ai_button_name(self):
-        settings = self._firebase_request("GET", "settings") or {}
-        return settings.get("ai_button_name", Config.AI_BUTTON_NAME)
-    
-    def update_web_url(self, new_url):
-        data = {"web_url": new_url}
-        result = self._firebase_request("PATCH", "settings", data)
-        
-        if result:
-            self.local_data["settings"]["web_url"] = new_url
-            self._save_local_backup()
-        return result
-    
-    def get_web_url(self):
-        settings = self._firebase_request("GET", "settings") or {}
-        return settings.get("web_url", Config.WEB_URL)
-    
-    def get_user(self, user_id):
-        user_id = str(user_id)
-        data = self._firebase_request("GET", f"users/{user_id}")
-        
-        if data:
-            return data
-        else:
-            return self.local_data.get('users', {}).get(user_id, None)
-    
-    def create_user(self, user_id, username="User", first_name="", last_name=""):
-        user_id = str(user_id)
-        
-        # 🆕 FIX: Handle users without username
-        if not username or username == "User":
-            if first_name:
-                username = first_name
-                if last_name:
-                    username += f" {last_name}"
-            else:
-                username = f"User_{user_id[-6:]}"
-        
-        referral_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-        
-        is_admin = (user_id == Config.ADMIN_USER_ID)
-        
-        user_data = {
-            "user_id": user_id,
-            "username": username,
-            "first_name": first_name or "",
-            "last_name": last_name or "",
-            "referral_code": referral_code,
-            "referrals": 0,
-            "total_earnings": 0,
-            "pending_balance": 0,
-            "withdrawn": 0,
-            "referrer": None,
-            "referral_claimed": False,
-            "upi_id": "",
-            "phone": "",
-            "email": "",
-            "is_verified": is_admin,
-            "channels_joined": {},
-            "created_at": datetime.now().isoformat(),
-            "last_active": datetime.now().isoformat(),
-            "is_admin": is_admin,
-            "verification_attempts": 0  # 🆕 NEW
-        }
-        
-        result = self._firebase_request("PUT", f"users/{user_id}", user_data)
-        
-        if "users" not in self.local_data:
-            self.local_data["users"] = {}
-        self.local_data["users"][user_id] = user_data
-        self._save_local_backup()
-        
-        return user_data
-    
-    def update_user(self, user_id, updates):
-        user_id = str(user_id)
-        current = self.get_user(user_id)
-        
-        if not current:
-            return False
-        
-        current.update(updates)
-        current["last_active"] = datetime.now().isoformat()
-        
-        result = self._firebase_request("PATCH", f"users/{user_id}", updates)
-        
-        if "users" not in self.local_data:
-            self.local_data["users"] = {}
-        self.local_data["users"][user_id] = current
-        self._save_local_backup()
-        
-        return True if result else False
-    
-    def mark_user_verified(self, user_id):
-        return self.update_user(user_id, {
-            "is_verified": True,
-            "verified_at": datetime.now().isoformat()
-        })
-    
-    def mark_channel_joined(self, user_id, channel_id):
-        user = self.get_user(user_id)
-        if not user:
-            return False
-        
-        if "channels_joined" not in user:
-            user["channels_joined"] = {}
-        
-        user["channels_joined"][channel_id] = {
-            "joined_at": datetime.now().isoformat(),
-            "verified": True,
-            "verified_at": datetime.now().isoformat()
-        }
-        
-        return self.update_user(user_id, {"channels_joined": user["channels_joined"]})
-    
-    def check_all_channels_joined(self, user_id):
-        user = self.get_user(user_id)
-        if not user:
-            return False
-        
-        channels = self.get_channels()
-        if not channels:
-            return True
-        
-        user_channels = user.get("channels_joined", {})
-        
-        for channel_id in channels.keys():
-            if channel_id not in user_channels or not user_channels[channel_id].get("verified", False):
-                return False
-        
-        return True
-    
-    def add_channel(self, channel_data):
-        channel_id = channel_data.get("id")
-        if not channel_id:
-            return False
-        
-        result = self._firebase_request("PUT", f"channels/{channel_id}", channel_data)
-        
-        if result is not None:
-            if "channels" not in self.local_data:
-                self.local_data["channels"] = {}
-            self.local_data["channels"][channel_id] = channel_data
-            self._save_local_backup()
-        
-        return result
-    
-    def get_channels(self):
-        data = self._firebase_request("GET", "channels") or {}
+    def create_user(self, uid, username="", first_name="", last_name=""):
+        uid = str(uid)
+        if not username: username = f"{first_name} {last_name}".strip() or f"User_{uid[-6:]}"
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        is_admin = uid == Config.ADMIN_USER_ID
+        data = {"user_id": uid, "username": username, "first_name": first_name or "", "last_name": last_name or "",
+                "referral_code": code, "referrals": 0, "total_earnings": 0, "pending_balance": 0, "withdrawn": 0,
+                "referrer": None, "referral_claimed": False, "upi_id": "", "is_verified": is_admin,
+                "channels_joined": {}, "created_at": datetime.now().isoformat(), "is_admin": is_admin}
+        self._req("PUT", f"users/{uid}", data)
+        self.local.setdefault("users", {})[uid] = data; self._save()
         return data
     
-    def delete_channel(self, channel_id):
-        result = self._firebase_request("DELETE", f"channels/{channel_id}")
-        
-        if result is not None:
-            if "channels" in self.local_data and channel_id in self.local_data["channels"]:
-                del self.local_data["channels"][channel_id]
-                self._save_local_backup()
-        
-        return result
+    def update_user(self, uid, updates):
+        uid = str(uid)
+        current = self.get_user(uid)
+        if not current: return False
+        current.update(updates); current["last_active"] = datetime.now().isoformat()
+        self._req("PATCH", f"users/{uid}", updates)
+        self.local.setdefault("users", {})[uid] = current; self._save()
+        return True
     
-    def create_withdrawal(self, withdrawal_id, data):
-        result = self._firebase_request("PUT", f"withdrawals/{withdrawal_id}", data)
-        return result
-    
-    def get_withdrawals(self, status=None):
-        withdrawals = self._firebase_request("GET", "withdrawals") or {}
-        
-        if status:
-            return {w_id: w for w_id, w in withdrawals.items() if w and w.get("status") == status}
-        return withdrawals
-    
-    def update_withdrawal_status(self, withdrawal_id, status, admin_note=""):
-        updates = {"status": status, "processed_at": datetime.now().isoformat()}
-        if admin_note:
-            updates["admin_note"] = admin_note
-        
-        return self._firebase_request("PATCH", f"withdrawals/{withdrawal_id}", updates)
-    
-    def update_upi_id(self, user_id, upi_id):
-        return self.update_user(user_id, {"upi_id": upi_id})
-    
-    def get_all_users(self):
-        return self._firebase_request("GET", "users") or {}
-    
-    def find_user_by_referral_code(self, referral_code):
-        """Find user by referral code"""
-        users = self.get_all_users()
-        for user_id, user_data in users.items():
-            if user_data and user_data.get("referral_code") == referral_code:
-                return user_id, user_data
+    def find_by_code(self, code):
+        users = self._req("GET", "users") or {}
+        for uid, data in users.items():
+            if data and data.get("referral_code") == code: return uid, data
         return None, None
+    
+    def add_channel(self, data):
+        cid = data.get("id")
+        if not cid: return False
+        result = self._req("PUT", f"channels/{cid}", data)
+        if result is not None: self.local.setdefault("channels", {})[cid] = data; self._save()
+        return result
+    
+    def get_channels(self): return self._req("GET", "channels") or {}
+    def delete_channel(self, cid):
+        result = self._req("DELETE", f"channels/{cid}")
+        if result is not None and cid in self.local.get("channels", {}): del self.local["channels"][cid]; self._save()
+        return result
+    
+    def create_withdrawal(self, wid, data): return self._req("PUT", f"withdrawals/{wid}", data)
+    def get_withdrawals(self, status=None):
+        wds = self._req("GET", "withdrawals") or {}
+        return {k: v for k, v in wds.items() if v and (not status or v.get("status") == status)} if status else wds
+    
+    def update_withdrawal(self, wid, status, note=""):
+        return self._req("PATCH", f"withdrawals/{wid}", {"status": status, "processed_at": datetime.now().isoformat(), "admin_note": note})
+    
+    def get_all_users(self): return self._req("GET", "users") or {}
 
-# ==================== TELEGRAM BOT API ====================
-class TelegramBotAPI:
+class TelegramBot:
     def __init__(self, token):
-        self.token = token
-        self.base_url = f"https://api.telegram.org/bot{token}/"
+        self.base = f"https://api.telegram.org/bot{token}/"
         self.db = FirebaseDB()
-        
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(message)s'
-        )
-        self.logger = logging.getLogger(__name__)
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
     
-    def _api_request(self, method, data=None):
+    def api(self, method, data=None):
         try:
-            url = self.base_url + method
-            
-            if data:
-                data = json.dumps(data, ensure_ascii=False).encode('utf-8')
-            
-            headers = {'Content-Type': 'application/json'}
-            req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-            
-            with urllib.request.urlopen(req, timeout=60) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                return result.get('result') if result.get('ok') else None
-                
-        except urllib.error.HTTPError as e:
-            if e.code == 409:
-                self.logger.warning(f"API 409 Conflict ({method}) - Retrying...")
-                time.sleep(2)
-                return None
-            self.logger.error(f"API Error {e.code} ({method}): {e}")
-            return None
-        except Exception as e:
-            self.logger.error(f"API Error ({method}): {e}")
-            return None
+            if data: data = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(self.base + method, data=data, headers={'Content-Type': 'application/json'}, method='POST')
+            result = json.loads(urllib.request.urlopen(req, timeout=60).read().decode('utf-8'))
+            return result.get('result') if result.get('ok') else None
+        except: return None
     
-    def get_chat_member(self, chat_id, user_id):
-        try:
-            data = {
-                "chat_id": chat_id,
-                "user_id": user_id
-            }
-            result = self._api_request("getChatMember", data)
-            
-            if result:
-                return result
-            
-            if chat_id.startswith("@"):
-                chat_id_without_at = chat_id[1:]
-                data["chat_id"] = chat_id_without_at
-                return self._api_request("getChatMember", data)
-                
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"getChatMember Error: {e}")
-            return None
+    def get_member(self, chat_id, user_id):
+        result = self.api("getChatMember", {"chat_id": chat_id, "user_id": user_id})
+        if not result and str(chat_id).startswith("@"):
+            result = self.api("getChatMember", {"chat_id": chat_id[1:], "user_id": user_id})
+        return result
     
-    def send_message(self, chat_id, text, reply_markup=None, parse_mode="HTML", disable_web_page_preview=True):
-        try:
-            data = {
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": parse_mode,
-                "disable_web_page_preview": disable_web_page_preview
-            }
-            
-            if reply_markup:
-                data["reply_markup"] = reply_markup
-            
-            return self._api_request("sendMessage", data)
-            
-        except Exception as e:
-            self.logger.error(f"sendMessage Error: {e}")
-            return None
+    def send(self, chat_id, text, kb=None, parse="HTML"):
+        data = {"chat_id": chat_id, "text": text, "parse_mode": parse, "disable_web_page_preview": True}
+        if kb: data["reply_markup"] = kb
+        return self.api("sendMessage", data)
     
-    def edit_message_text(self, chat_id, message_id, text, reply_markup=None, parse_mode="HTML"):
-        try:
-            data = {
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "text": text,
-                "parse_mode": parse_mode
-            }
-            
-            if reply_markup:
-                data["reply_markup"] = reply_markup
-            
-            return self._api_request("editMessageText", data)
-            
-        except Exception as e:
-            self.logger.error(f"editMessageText Error: {e}")
-            return None
+    def edit(self, chat_id, msg_id, text, kb=None, parse="HTML"):
+        data = {"chat_id": chat_id, "message_id": msg_id, "text": text, "parse_mode": parse}
+        if kb: data["reply_markup"] = kb
+        return self.api("editMessageText", data)
     
-    def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
-        data = {
-            "callback_query_id": callback_query_id,
-            "show_alert": show_alert
-        }
-        
-        if text:
-            data["text"] = text
-        
-        return self._api_request("answerCallbackQuery", data)
+    def answer(self, cb_id, text=None, alert=False):
+        return self.api("answerCallbackQuery", {"callback_query_id": cb_id, "text": text, "show_alert": alert})
     
-    def get_updates(self, offset=None, timeout=60):
-        data = {
-            "timeout": timeout,
-            "allowed_updates": ["message", "callback_query"]
-        }
-        if offset:
-            data["offset"] = offset
-        
-        result = self._api_request("getUpdates", data)
-        return result or []
-    
-    def check_webhook_status(self):
-        return self._api_request("getWebhookInfo")
+    def updates(self, offset=None):
+        data = {"timeout": 60, "allowed_updates": ["message", "callback_query"]}
+        if offset: data["offset"] = offset
+        return self.api("getUpdates", data) or []
 
-# ==================== MAIN BOT CLASS ====================
 class TradeGeniusBot:
     def __init__(self):
-        self.bot = TelegramBotAPI(Config.BOT_TOKEN)
+        self.bot = TelegramBot(Config.BOT_TOKEN)
         self.db = self.bot.db
         self.running = True
         self.offset = 0
-        self.user_states = {}
-        self.pending_referrals = {}
+        self.states = {}
+        self.pending_refs = {}
     
-    def get_display_name(self, user_data, user_id):
-        """Get proper display name for user"""
-        username = user_data.get('username', 'User')
-        user_id_str = str(user_id)
-        
-        # Check for invalid usernames
-        invalid_names = ["User", "@User", "User_None", "None", "", None]
-        
-        if username in invalid_names:
-            first_name = user_data.get('first_name', '')
-            last_name = user_data.get('last_name', '')
-            
-            if first_name:
-                display_name = first_name
-                if last_name:
-                    display_name += f" {last_name}"
-            else:
-                display_name = f"User_{user_id_str[-6:]}"
-        else:
-            display_name = username
-        
-        return display_name
-    
-    def generate_keyboard(self, buttons, columns=2):
-        keyboard = []
-        row = []
-        
-        for i, button in enumerate(buttons):
-            if isinstance(button, tuple):
-                text, callback = button
-                row.append({"text": text, "callback_data": callback})
-            elif isinstance(button, dict):
-                row.append(button)
-            else:
-                continue
-            
-            if len(row) == columns or i == len(buttons) - 1:
-                keyboard.append(row)
-                row = []
-        
+    def kb(self, buttons, cols=2):
+        keyboard, row = [], []
+        for i, btn in enumerate(buttons):
+            if isinstance(btn, tuple): row.append({"text": btn[0], "callback_data": btn[1]})
+            elif isinstance(btn, dict): row.append(btn)
+            if len(row) == cols or i == len(buttons) - 1: keyboard.append(row); row = []
         return {"inline_keyboard": keyboard}
     
-    def get_main_menu_buttons(self, user_id):
-        is_admin = (str(user_id) == Config.ADMIN_USER_ID)
-        
-        ai_button_name = self.db.get_ai_button_name()
-        
-        buttons = [
-            ("🔗 Get Referral Link", "my_referral"),
-            ("📊 My Dashboard", "dashboard"),
-            ("💳 Withdraw", "withdraw"),
-            (ai_button_name, "open_web"),
-            ("📜 Terms & Conditions", "terms_conditions"),
-            ("📢 How It Works", "how_it_works"),
-            ("🎁 Rewards", "rewards"),
-            ("📞 Support", "support"),
-        ]
-        
-        if is_admin:
-            buttons.append(("👑 Admin Panel", "admin_panel"))
-        
-        return buttons
+    def menu_btns(self, uid):
+        btns = [("🔗 Get Referral Link", "my_referral"), ("📊 My Dashboard", "dashboard"), ("💳 Withdraw", "withdraw"),
+                (self.db.get_setting("ai_button_name", Config.AI_BUTTON_NAME), "open_web"),
+                ("📜 Terms & Conditions", "terms"), ("📢 How It Works", "how"), ("🎁 Rewards", "rewards"), ("📞 Support", "support")]
+        if str(uid) == Config.ADMIN_USER_ID: btns.append(("👑 Admin Panel", "admin"))
+        return btns
     
-    def show_terms_conditions(self, chat_id, message_id, user_id):
-        terms_text = """📜 <b>Terms & Conditions</b>
-
-✅ <b>By using this bot, you agree to:</b>
-
-1. <b>Join all channels</b> to earn points
-2. Each user can earn points from <b>ONLY ONE referrer</b>
-3. <b>No self-referrals</b> allowed
-4. Points and coupons are <b>non-transferable</b>
-5. <b>Fraudulent activity</b> will result in permanent ban
-
-📝 <b>Additional Terms:</b>
-• Minimum withdrawal: ₹20
-• UPI is the only withdrawal method
-• Payments processed within 24 hours
-• Admin reserves right to modify terms
-• You must be 18+ to use this service
-
-<i>Last Updated: {}</i>""".format(datetime.now().strftime("%d %B %Y"))
-        
-        buttons = [
-            ("✅ I Understand", "main_menu"),
-            ("🏠 Main Menu", "main_menu")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, terms_text, keyboard)
-    
-    def start_command(self, chat_id, user_id, username, first_name, last_name, args):
-        # 🆕 FIX: Handle anonymous users
-        user = self.db.get_user(user_id)
-        
-        if not user:
-            user = self.db.create_user(user_id, username, first_name, last_name)
-        
-        if str(user_id) == Config.ADMIN_USER_ID:
-            if not user.get("is_verified", False):
-                self.db.update_user(user_id, {"is_verified": True})
-            user["is_verified"] = True
-            self.show_welcome_screen(chat_id, user_id, user, args)
-            return
-        
-        # 🆕 FIX: Store referral code if provided (even before verification)
-        referral_code = args[0] if args and len(args) > 0 else None
-        if referral_code:
-            # Store referral code for later processing
-            self.pending_referrals[str(user_id)] = {
-                "referral_code": referral_code,
-                "attempts": 0,
-                "last_attempt": datetime.now().isoformat()
-            }
-            
-            # Track the attempt
-            self.db.track_referral_attempt(user_id, referral_code, "pending_verification")
-        
+    def check_channels(self, uid):
         channels = self.db.get_channels()
-        
-        if not channels:
-            if not user.get("is_verified", False):
-                self.db.mark_user_verified(user_id)
-                user["is_verified"] = True
-            
-            # 🆕 FIX: Process referral after verification
-            if user.get("is_verified", False) and str(user_id) in self.pending_referrals:
-                self.process_pending_referral(user_id, username)
-            
-            self.show_welcome_screen(chat_id, user_id, user, args)
-            return
-        
-        # Check channel membership
-        all_joined = self.check_user_channels(user_id)
-        
-        if all_joined:
-            if not user.get("is_verified", False):
-                self.db.mark_user_verified(user_id)
-                user["is_verified"] = True
-            
-            # 🆕 FIX: Process referral after successful verification
-            if user.get("is_verified", False) and str(user_id) in self.pending_referrals:
-                self.process_pending_referral(user_id, username)
-            
-            self.show_welcome_screen(chat_id, user_id, user, args)
-        else:
-            self.show_verification_screen_real_time(chat_id, user_id, username)
-    
-    def check_user_channels(self, user_id):
-        """Check if user has joined all channels"""
-        channels = self.db.get_channels()
-        
-        if not channels:
-            return True
-        
-        all_joined = True
-        
-        for channel_id, channel in channels.items():
-            username = channel.get("username", "")
-            if not username:
+        if not channels: return True
+        for cid, ch in channels.items():
+            chat_id = ch.get("chat_id") or ch.get("username")
+            if not chat_id: continue
+            # For private channels with chat_id
+            if ch.get("is_private") and ch.get("chat_id"):
+                chat_id = ch.get("chat_id")
+            elif ch.get("username"):
+                chat_id = "@" + ch["username"] if not ch["username"].startswith("@") else ch["username"]
+            else:
                 continue
-            
             try:
-                # Add @ if not present
-                if not username.startswith("@"):
-                    chat_id_for_check = "@" + username
-                else:
-                    chat_id_for_check = username
-                
-                member_info = self.bot.get_chat_member(chat_id_for_check, user_id)
-                
-                if member_info and member_info.get("status") in ["member", "administrator", "creator"]:
-                    self.db.mark_channel_joined(user_id, channel_id)
-                else:
-                    all_joined = False
-                    break
-            
-            except Exception as e:
-                print(f"⚠️ Error checking channel @{username}: {e}")
-                all_joined = False
-                break
-        
-        return all_joined
-    
-    def process_pending_referral(self, user_id, username):
-        """Process pending referral after user verification"""
-        user_id_str = str(user_id)
-        
-        if user_id_str not in self.pending_referrals:
-            return False
-        
-        pending = self.pending_referrals[user_id_str]
-        referral_code = pending["referral_code"]
-        
-        # Prevent multiple attempts
-        if pending.get("attempts", 0) >= Config.MAX_VERIFICATION_ATTEMPTS:
-            del self.pending_referrals[user_id_str]
-            return False
-        
-        # Check if already claimed
-        user = self.db.get_user(user_id)
-        if user and user.get("referral_claimed", False):
-            del self.pending_referrals[user_id_str]
-            return True
-        
-        # Wait a bit for verification to complete
-        time.sleep(Config.REFERRAL_VERIFICATION_DELAY)
-        
-        # Process referral
-        success = self.process_referral(user_id, username, referral_code)
-        
-        if success:
-            del self.pending_referrals[user_id_str]
-            self.db.track_referral_attempt(user_id, referral_code, "success")
-            return True
-        else:
-            pending["attempts"] = pending.get("attempts", 0) + 1
-            pending["last_attempt"] = datetime.now().isoformat()
-            self.db.track_referral_attempt(user_id, referral_code, f"failed_attempt_{pending['attempts']}")
-            
-            if pending["attempts"] >= Config.MAX_VERIFICATION_ATTEMPTS:
-                del self.pending_referrals[user_id_str]
-            
-            return False
-    
-    def process_referral(self, user_id, username, referral_code):
-        """Process referral with proper validation"""
-        user = self.db.get_user(user_id)
-        if not user:
-            return False
-        
-        # Check if already claimed referral
-        if user.get("referral_claimed", False):
-            print(f"⚠️ User {user_id} already claimed referral")
-            return True
-        
-        # Find referrer
-        referrer_id, referrer = self.db.find_user_by_referral_code(referral_code)
-        
-        if not referrer or not referrer_id:
-            print(f"❌ Referral code not found: {referral_code}")
-            return False
-        
-        # Prevent self-referral
-        if referrer_id == str(user_id):
-            print(f"❌ Self-referral attempt by {user_id}")
-            return False
-        
-        # Check if referrer is verified
-        if not referrer.get("is_verified", False):
-            print(f"❌ Referrer {referrer_id} not verified")
-            return False
-        
-        # 🆕 FIX: Create referral record first
-        self.db.create_referral_record(user_id, referrer_id, "completed")
-        
-        # Calculate reward
-        new_refs = referrer.get("referrals", 0) + 1
-        reward = Config.REWARD_PER_REFERRAL
-        
-        # Bonus at 10 referrals
-        if new_refs == 10:
-            reward += Config.BONUS_AT_10_REFERRALS
-        
-        # Update referrer's stats
-        updates = {
-            "referrals": new_refs,
-            "pending_balance": referrer.get("pending_balance", 0) + reward,
-            "total_earnings": referrer.get("total_earnings", 0) + reward
-        }
-        
-        self.db.update_user(referrer_id, updates)
-        
-        # Update new user's referral status
-        self.db.update_user(user_id, {
-            "referrer": referrer_id,
-            "referral_claimed": True,
-            "referral_claimed_at": datetime.now().isoformat()
-        })
-        
-        # Notify referrer
-        try:
-            self.bot.send_message(
-                referrer_id,
-                f"""🎉 <b>New Referral Success!</b>
-
-✅ @{username} joined using your link!
-💰 You earned: <b>₹{reward}</b>
-👥 Total referrals: <b>{new_refs}</b>
-
-Keep sharing to earn more!"""
-            )
-        except Exception as e:
-            print(f"⚠️ Failed to notify referrer: {e}")
-        
-        print(f"✅ Referral processed: {user_id} -> {referrer_id} (₹{reward})")
+                member = self.bot.get_member(chat_id, uid)
+                if not member or member.get("status") not in ["member", "administrator", "creator"]: return False
+                self.db.update_user(uid, {"channels_joined": {cid: {"verified": True, "at": datetime.now().isoformat()}}})
+            except: return False
         return True
     
-    def show_verification_screen_real_time(self, chat_id, user_id, username):
-        channels = self.db.get_channels()
-        
-        if not channels:
-            self.db.mark_user_verified(user_id)
-            self.show_verification_success(chat_id, None, user_id)
-            return
-        
-        msg = "🔐 <b>Join our channels to continue</b>\n\nPlease join ALL channels below:"
-        
-        buttons = []
-        
-        for channel_id, channel in channels.items():
-            channel_name = channel.get("name", "Channel")
-            channel_username = channel.get("username", "")
-            
-            if not channel_username:
-                continue
-            
-            # Ensure @ is added for URL
-            if not channel_username.startswith("@"):
-                channel_username = "@" + channel_username
-            
-            channel_url = f"https://t.me/{channel_username[1:]}"
-            
-            clean_name = channel_name.replace("📢", "").replace("🔔", "").replace("📰", "").strip()
-            if not clean_name:
-                clean_name = "Join Channel"
-            
-            buttons.append({"text": f"📢 {clean_name}", "url": channel_url})
-        
-        buttons.append(("✅ I'VE JOINED ALL - VERIFY NOW", "check_verification"))
-        
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.send_message(chat_id, msg, keyboard)
+    def process_referral(self, uid, username, code):
+        user = self.db.get_user(uid)
+        if not user or user.get("referral_claimed"): return True
+        ref_id, referrer = self.db.find_by_code(code)
+        if not referrer or ref_id == str(uid) or not referrer.get("is_verified"): return False
+        new_refs = referrer.get("referrals", 0) + 1
+        reward = Config.REWARD_PER_REFERRAL + (Config.BONUS_AT_10_REFERRALS if new_refs == 10 else 0)
+        self.db.update_user(ref_id, {"referrals": new_refs, "pending_balance": referrer.get("pending_balance", 0) + reward,
+                                     "total_earnings": referrer.get("total_earnings", 0) + reward})
+        self.db.update_user(uid, {"referrer": ref_id, "referral_claimed": True})
+        self.bot.send(ref_id, f"🎉 <b>New Referral!</b>\n\n✅ @{username} joined!\n💰 Earned: <b>₹{reward}</b>\n👥 Total: <b>{new_refs}</b>")
+        return True
     
-    def check_verification(self, chat_id, message_id, user_id):
-        user = self.db.get_user(user_id)
-        if not user:
-            self.bot.send_message(chat_id, "❌ User not found.")
-            return
-        
-        # 🆕 FIX: Increment verification attempts
-        attempts = user.get("verification_attempts", 0) + 1
-        self.db.update_user(user_id, {"verification_attempts": attempts})
-        
-        all_joined = self.check_user_channels(user_id)
-        
-        if all_joined:
-            self.db.mark_user_verified(user_id)
-            
-            # 🆕 FIX: Process any pending referral
-            username = user.get("username", "User")
-            if str(user_id) in self.pending_referrals:
-                self.process_pending_referral(user_id, username)
-            
-            self.show_verification_success(chat_id, message_id, user_id)
-        else:
-            self.show_verification_failed(chat_id, message_id, user_id)
-    
-    def show_verification_success(self, chat_id, message_id, user_id):
-        user = self.db.get_user(user_id)
-        username = user.get("username", "User") if user else "User"
-        
-        msg = f"""✅ <b>Verification Successful!</b>
-
-Welcome to <b>TradeGenius07 Bot</b>, @{username}!
-
-🎉 You can now start earning <b>₹{Config.REWARD_PER_REFERRAL}</b> per referral.
-
-👇 <b>Get started:</b>"""
-        
-        buttons = [
-            ("🔗 Get Referral Link", "my_referral"),
-            ("📊 Dashboard", "dashboard"),
-            ("🏠 Main Menu", "main_menu")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        
-        if message_id:
-            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-        else:
-            self.bot.send_message(chat_id, msg, keyboard)
-    
-    def show_verification_failed(self, chat_id, message_id, user_id):
-        msg = """❌ <b>Verification Failed</b>
-
-You haven't joined all channels yet.
-
-Please:
-1. Join ALL channels from the list
-2. Wait 10 seconds after joining
-3. Click VERIFY again
-
-If already joined, wait a moment and try again."""
-        
-        buttons = [
-            ("🔄 Try Again", "check_verification"),
-            ("📋 Show Channels", "show_channels_again")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_welcome_screen(self, chat_id, user_id, user, args):
-        if not user:
-            user = self.db.get_user(user_id)
-        
-        if not user:
-            return
-        
-        is_admin = (str(user_id) == Config.ADMIN_USER_ID)
-        admin_text = "\n👑 <b>Admin Status: Active</b>" if is_admin else ""
-        verified_text = "\n✅ <b>Status: Verified</b>" if user.get("is_verified", False) else "\n❌ <b>Status: Not Verified</b>"
-        
-        # 🆕 FIX: Show referral status
-        referral_status = ""
-        if user.get("referrer"):
-            referral_status = f"\n👥 Referred by: User_{user['referrer'][-6:]}"
-        elif user.get("referral_claimed", False):
-            referral_status = "\n✅ Referral already claimed"
-        
-        welcome_msg = f"""👋 <b>Welcome to TradeGenius07 Bot!</b> 💸
-
-👤 Hello, {user.get('username', 'User')}!{admin_text}{verified_text}{referral_status}
-
-💰 Earn <b>₹{Config.REWARD_PER_REFERRAL}</b> per referral
-🔗 Your Code: <code>{user.get('referral_code', 'N/A')}</code>
-👥 Referrals: {user.get('referrals', 0)}
-💸 Balance: ₹{user.get('pending_balance', 0)}
-
-👇 <b>Select an option:</b>"""
-        
-        buttons = self.get_main_menu_buttons(user_id)
-        keyboard = self.generate_keyboard(buttons, 2)
-        
-        self.bot.send_message(chat_id, welcome_msg, keyboard)
-    
-    def handle_callback(self, chat_id, message_id, user_id, callback_data):
-        callback_query_id = callback_data["id"]
-        callback = callback_data.get("data", "")
-        
-        self.bot.answer_callback_query(callback_query_id)
-        
-        user = self.db.get_user(user_id) or {}
-        
-        if callback == "terms_conditions":
-            self.show_terms_conditions(chat_id, message_id, user_id)
-            return
-        
-        if callback == "open_web":
-            web_url = self.db.get_web_url()
-            ai_button_name = self.db.get_ai_button_name()
-            
-            buttons = [
-                {"text": ai_button_name, "url": web_url},
-                ("🏠 Main Menu", "main_menu")
-            ]
-            keyboard = self.generate_keyboard(buttons, 2)
-            msg = f"""🤖 <b>AI Assistant</b>
-
-🔓 Tap the Button Below to Unlock Access..."""
-            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-            return
-        
-        if callback == "show_channels_again":
-            self.show_verification_screen_real_time(chat_id, user_id, user.get("username", "User"))
-            return
-        
-        # Admin checks
-        if callback == "admin_panel" and str(user_id) != Config.ADMIN_USER_ID:
-            msg = "⛔ <b>Access Denied</b>"
-            keyboard = self.generate_keyboard([("🏠 Main Menu", "main_menu")], 1)
-            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-            return
-        
-        # Verification check for non-admin users
-        if str(user_id) != Config.ADMIN_USER_ID and not user.get("is_verified", False):
-            if callback not in ["check_verification", "show_channels_again", "main_menu"]:
-                msg = """❌ <b>Verification Required</b>
-
-Please complete verification first to access bot features.
-
-Join all required channels and verify."""
-                keyboard = self.generate_keyboard([
-                    ("✅ VERIFY NOW", "check_verification")
-                ], 1)
-                self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-                return
-        
-        # Handle other callbacks
-        if callback == "check_verification":
-            self.check_verification(chat_id, message_id, user_id)
-        
-        elif callback == "main_menu":
-            self.show_main_menu(chat_id, message_id, user_id, user)
-        
-        elif callback == "my_referral":
-            self.show_referral_link(chat_id, message_id, user_id, user)
-        
-        elif callback == "dashboard":
-            self.show_dashboard(chat_id, message_id, user_id, user)
-        
-        elif callback == "withdraw":
-            self.show_withdraw_menu(chat_id, message_id, user_id, user)
-        
-        elif callback == "setup_upi":
-            self.setup_upi_id(chat_id, message_id, user_id)
-        
-        elif callback == "request_withdraw":
-            self.request_withdrawal(chat_id, message_id, user_id, user)
-        
-        elif callback == "withdraw_history":
-            self.show_withdrawal_history(chat_id, message_id, user_id)
-        
-        elif callback == "admin_panel":
-            self.show_admin_panel(chat_id, message_id, user_id)
-        
-        elif callback.startswith("admin_"):
-            if str(user_id) != Config.ADMIN_USER_ID:
-                return
-            self.handle_admin_callback(chat_id, message_id, user_id, callback)
-        
-        elif callback in ["how_it_works", "rewards", "support"]:
-            self.handle_info_callback(chat_id, message_id, user_id, callback)
-    
-    def show_referral_link(self, chat_id, message_id, user_id, user):
-        referral_code = user.get("referral_code", "")
-        if not referral_code:
-            referral_code = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-            self.db.update_user(user_id, {"referral_code": referral_code})
-        
-        referral_link = f"https://t.me/{Config.BOT_USERNAME}?start={referral_code}"
-        
-        msg = f"""🔗 <b>Your Referral Link</b>
-
-<code>{referral_link}</code>
-
-💰 <b>Earn ₹{Config.REWARD_PER_REFERRAL} per referral</b>
-
-📊 <b>Your Stats:</b>
-👥 Referrals: {user.get('referrals', 0)}
-💰 Pending: ₹{user.get('pending_balance', 0)}
-💸 Total: ₹{user.get('total_earnings', 0)}
-
-Share with friends and earn!"""
-        
-        share_text = f"Join TradeGenius07 bot and earn money! {referral_link}"
-        share_url = f"https://t.me/share/url?url={quote(referral_link)}&text={quote(share_text)}"
-        
-        buttons = [
-            {"text": "📤 Share", "url": share_url},
-            ("📊 Dashboard", "dashboard"),
-            ("🏠 Main Menu", "main_menu")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_dashboard(self, chat_id, message_id, user_id, user):
-        verified_status = "✅ Verified" if user.get("is_verified", False) else "❌ Not Verified"
-        
-        # 🆕 FIX: Show referral info
-        referral_info = ""
-        if user.get("referrer"):
-            referral_info = f"\n👥 Referred by: User_{user['referrer'][-6:]}"
-        elif user.get("referral_claimed", False):
-            referral_info = "\n✅ Referral claimed"
-        
-        msg = f"""📊 <b>Dashboard</b>
-
-👤 {user.get('username', 'User')}
-🔗 Code: <code>{user.get('referral_code', 'N/A')}</code>
-📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>
-🔄 Status: <b>{verified_status}</b>{referral_info}
-
-📈 <b>Statistics:</b>
-👥 Referrals: <b>{user.get('referrals', 0)}</b>
-💰 Pending: <b>₹{user.get('pending_balance', 0)}</b>
-💸 Total Earned: <b>₹{user.get('total_earnings', 0)}</b>
-✅ Withdrawn: <b>₹{user.get('withdrawn', 0)}</b>"""
-        
-        buttons = [
-            ("💳 Withdraw", "withdraw"),
-            ("🔗 Get Link", "my_referral"),
-            ("🏠 Main Menu", "main_menu")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_withdraw_menu(self, chat_id, message_id, user_id, user):
-        pending = user.get("pending_balance", 0)
-        upi_id = user.get("upi_id", "")
-        
-        if not upi_id:
-            msg = f"""❌ <b>UPI ID Required</b>
-
-You need to set up your UPI ID first.
-UPI ID format: <code>username@upi</code>
-
-Current balance: <b>₹{pending}</b>
-Minimum withdrawal: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>"""
-            
-            buttons = [
-                ("📱 Setup UPI ID", "setup_upi"),
-                ("📊 Dashboard", "dashboard"),
-                ("📜 History", "withdraw_history"),
-                ("🏠 Main Menu", "main_menu")
-            ]
-        
-        elif pending >= Config.MINIMUM_WITHDRAWAL:
-            msg = f"""💳 <b>Withdraw Funds</b>
-
-💰 Available: <b>₹{pending}</b>
-💰 Minimum: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>
-📱 Your UPI: <code>{upi_id}</code>
-📞 Phone: {user.get('phone', 'Not set')}
-📧 Email: {user.get('email', 'Not set')}
-
-🏦 <b>Payment Method:</b>
-• UPI Only (Google Pay, PhonePe, Paytm)
-
-⚠️ Payment processed within 24 hours"""
-            
-            buttons = [
-                ("✅ Request Withdrawal", "request_withdraw"),
-                ("✏️ Change UPI", "setup_upi"),
-                ("📜 History", "withdraw_history"),
-                ("🏠 Main Menu", "main_menu")
-            ]
-        else:
-            needed = Config.MINIMUM_WITHDRAWAL - pending
-            referrals_needed = (needed + Config.REWARD_PER_REFERRAL - 1) // Config.REWARD_PER_REFERRAL
-            
-            msg = f"""❌ <b>Insufficient Balance</b>
-
-💰 Available: <b>₹{pending}</b>
-💰 Required: <b>₹{Config.MINIMUM_WITHDRAWAL}</b>
-📊 Need: <b>₹{needed}</b> more
-
-🔗 Get {referrals_needed} more referrals to withdraw."""
-            
-            buttons = [
-                ("🔗 Referral Link", "my_referral"),
-                ("📊 Dashboard", "dashboard"),
-                ("📜 History", "withdraw_history"),
-                ("🏠 Main Menu", "main_menu")
-            ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def setup_upi_id(self, chat_id, message_id, user_id):
-        msg = """📱 <b>Setup UPI ID</b>
-
-Send your UPI ID in this format:
-<code>username@upi</code>
-
-<b>Examples:</b>
-• <code>john.doe@okaxis</code>
-• <code>janesmith@ybl</code>
-• <code>rohitkumar@paytm</code>
-
-⚠️ Withdrawals will be sent to this UPI ID."""
-        
-        self.user_states[user_id] = {
-            "state": "awaiting_upi",
-            "chat_id": chat_id,
-            "message_id": message_id
-        }
-        
-        buttons = [("❌ Cancel", "withdraw")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def request_withdrawal(self, chat_id, message_id, user_id, user):
-        pending = user.get("pending_balance", 0)
-        upi_id = user.get("upi_id", "")
-        
-        if pending < Config.MINIMUM_WITHDRAWAL:
-            msg = "❌ Insufficient balance."
-            keyboard = self.generate_keyboard([("🏠 Main Menu", "main_menu")], 1)
-            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-            return
-        
-        if not upi_id:
-            msg = "❌ UPI ID not set."
-            keyboard = self.generate_keyboard([("📱 Setup UPI", "setup_upi")], 1)
-            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-            return
-        
-        withdrawal_id = f"WD{random.randint(100000, 999999)}"
-        
-        withdrawal_data = {
-            "user_id": str(user_id),
-            "username": user.get("username", ""),
-            "amount": pending,
-            "upi_id": upi_id,
-            "phone": user.get("phone", ""),
-            "email": user.get("email", ""),
-            "payment_method": "upi",
-            "status": "pending",
-            "requested_at": datetime.now().isoformat(),
-            "withdrawal_id": withdrawal_id,
-            "form_type": "upi/mono"
-        }
-        
-        self.db.create_withdrawal(withdrawal_id, withdrawal_data)
-        
-        self.db.update_user(user_id, {
-            "pending_balance": 0,
-            "withdrawn": user.get("withdrawn", 0) + pending
-        })
-        
-        admin_msg = f"""🆕 <b>WITHDRAWAL REQUEST</b>
-
-👤 User: @{user.get('username', 'N/A')}
-💰 Amount: <b>₹{pending}</b>
-📱 UPI ID: <code>{upi_id}</code>
-📞 Phone: {user.get('phone', 'N/A')}
-📧 Email: {user.get('email', 'N/A')}
-📋 ID: {withdrawal_id}
-⏰ Time: {datetime.now().strftime('%H:%M %d/%m')}
-📄 Form Type: UPI/Mono Form
-
-Click /admin to manage."""
-        
-        self.bot.send_message(Config.ADMIN_USER_ID, admin_msg)
-        
-        confirm_msg = f"""✅ <b>Request Submitted</b>
-
-📋 ID: <code>{withdrawal_id}</code>
-💰 Amount: <b>₹{pending}</b>
-📅 Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}
-🔄 Status: <b>Pending</b>
-⏳ Payouts Are Processed Within 24–72 Hours
-🏦 Payouts Are Not Processed On Public And Bank Holidays."""
-        
-        buttons = [
-            ("📜 Check Status", "withdraw_history"),
-            ("🏠 Main Menu", "main_menu")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, confirm_msg, keyboard)
-    
-    def show_withdrawal_history(self, chat_id, message_id, user_id):
-        withdrawals = self.db.get_withdrawals()
-        user_wds = {}
-        
-        for w_id, w_data in withdrawals.items():
-            if w_data and w_data.get("user_id") == str(user_id):
-                user_wds[w_id] = w_data
-        
-        if not user_wds:
-            msg = "📜 <b>Withdrawal History</b>\n\nNo withdrawals yet."
-        else:
-            msg = "📜 <b>Withdrawal History</b>\n\n"
-            
-            sorted_wds = sorted(
-                user_wds.items(),
-                key=lambda x: x[1].get("requested_at", ""),
-                reverse=True
-            )[:10]
-            
-            for w_id, w_data in sorted_wds:
-                date = datetime.fromisoformat(w_data["requested_at"]).strftime("%d/%m %H:%M")
-                amount = w_data.get("amount", 0)
-                status = w_data.get("status", "pending")
-                
-                if status == "completed":
-                    status_emoji = "✅"
-                elif status == "rejected":
-                    status_emoji = "❌"
-                else:
-                    status_emoji = "⏳"
-                
-                msg += f"{status_emoji} ₹{amount} - {date} ({status})\n"
-        
-        buttons = [
-            ("💰 Withdraw", "withdraw"),
-            ("📊 Dashboard", "dashboard"),
-            ("🏠 Main Menu", "main_menu")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_main_menu(self, chat_id, message_id, user_id, user):
-        is_admin = (str(user_id) == Config.ADMIN_USER_ID)
-        admin_text = "\n👑 <b>Admin Mode</b>" if is_admin else ""
-        verified_text = "\n✅ <b>Verified</b>" if user.get("is_verified", False) else "\n❌ <b>Not Verified</b>"
-        
-        ai_button_name = self.db.get_ai_button_name()
-        
-        msg = f"""🏠 <b>Main Menu</b>{admin_text}{verified_text}
-
-👋 {user.get('username', 'User')}
-💰 Balance: <b>₹{user.get('pending_balance', 0)}</b>
-👥 Referrals: <b>{user.get('referrals', 0)}</b>
-📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>
-"""
-        
-        buttons = self.get_main_menu_buttons(user_id)
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_admin_panel(self, chat_id, message_id, user_id):
-        users = self.db.get_all_users()
-        total_users = len(users) if users else 0
-        
-        withdrawals = self.db.get_withdrawals("pending")
-        pending_withdrawals = len(withdrawals) if withdrawals else 0
+    def start(self, chat_id, uid, username, fname, lname, args):
+        user = self.db.get_user(uid) or self.db.create_user(uid, username, fname, lname)
+        is_admin = str(uid) == Config.ADMIN_USER_ID
+        if is_admin and not user.get("is_verified"): self.db.update_user(uid, {"is_verified": True}); user["is_verified"] = True
+        
+        ref_code = args[0] if args else None
+        if ref_code: self.pending_refs[str(uid)] = ref_code
         
         channels = self.db.get_channels()
-        total_channels = len(channels) if channels else 0
-        
-        web_url = self.db.get_web_url()
-        ai_button_name = self.db.get_ai_button_name()
-        
-        # 🆕 NEW: Referral stats
-        successful_referrals = self.db.get_successful_referrals(user_id)
-        referral_count = len(successful_referrals)
-        
-        msg = f"""👑 <b>Admin Control Panel</b>
-
-📊 <b>Stats:</b>
-👥 Users: {total_users}
-💳 Pending WD: {pending_withdrawals}
-📢 Channels: {total_channels}
-🤝 Successful Referrals: {referral_count}
-🌐 Web URL: {web_url[:30]}...
-🤖 AI Button: {ai_button_name}
-
-👇 <b>Select:</b>"""
-        
-        buttons = [
-            ("📊 Statistics", "admin_stats"),
-            ("💳 Withdrawals", "admin_withdrawals"),
-            ("📢 Channels", "admin_channels"),
-            ("🌐 Web URL", "admin_web_url"),
-            ("🤖 AI Button", "admin_ai_button"),
-            ("👥 Users", "admin_users"),
-            ("📢 Broadcast", "admin_broadcast"),
-            ("🏠 Main Menu", "main_menu")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+        if not channels or is_admin or self.check_channels(uid):
+            if not user.get("is_verified"): self.db.update_user(uid, {"is_verified": True}); user["is_verified"] = True
+            if str(uid) in self.pending_refs: self.process_referral(uid, username, self.pending_refs.pop(str(uid)))
+            self.welcome(chat_id, uid, user)
+        else:
+            self.verify_screen(chat_id, uid)
     
-    def handle_admin_callback(self, chat_id, message_id, user_id, callback):
-        if callback == "admin_stats":
-            self.show_admin_stats(chat_id, message_id, user_id)
-        
-        elif callback == "admin_withdrawals":
-            self.show_withdrawal_management(chat_id, message_id, user_id)
-        
-        elif callback == "admin_channels":
-            self.show_channel_management(chat_id, message_id, user_id)
-        
-        elif callback == "admin_web_url":
-            self.show_web_url_management(chat_id, message_id, user_id)
-        
-        elif callback == "admin_ai_button":
-            self.show_ai_button_management(chat_id, message_id, user_id)
-        
-        elif callback == "admin_users":
-            self.show_user_management(chat_id, message_id, user_id)
-        
-        elif callback == "admin_broadcast":
-            self.show_broadcast_menu(chat_id, message_id, user_id)
-        
-        elif callback == "admin_add_channel":
-            self.show_add_channel(chat_id, message_id, user_id)
-        
-        elif callback == "admin_view_channels":
-            self.show_channel_list(chat_id, message_id, user_id)
-        
-        elif callback.startswith("admin_delete_channel_"):
-            channel_id = callback.replace("admin_delete_channel_", "")
-            self.delete_channel(chat_id, message_id, user_id, channel_id)
-        
-        elif callback.startswith("admin_approve_"):
-            wd_id = callback.replace("admin_approve_", "")
-            self.approve_withdrawal(chat_id, message_id, user_id, wd_id)
-        
-        elif callback.startswith("admin_reject_"):
-            wd_id = callback.replace("admin_reject_", "")
-            self.reject_withdrawal(chat_id, message_id, user_id, wd_id)
-        
-        elif callback == "admin_update_web_url":
-            self.show_update_web_url(chat_id, message_id, user_id)
-        
-        elif callback == "admin_update_ai_button":
-            self.show_update_ai_button(chat_id, message_id, user_id)
+    def verify_screen(self, chat_id, uid):
+        channels = self.db.get_channels()
+        if not channels: self.db.update_user(uid, {"is_verified": True}); self.welcome(chat_id, uid, self.db.get_user(uid)); return
+        btns = []
+        for cid, ch in channels.items():
+            name = ch.get("name", "Channel")
+            link = ch.get("link") or (f"https://t.me/{ch['username']}" if ch.get("username") else "")
+            if link: btns.append({"text": f"📢 {name}", "url": link})
+        btns.append(("✅ VERIFY NOW", "verify"))
+        self.bot.send(chat_id, "🔐 <b>Join channels to continue</b>\n\nJoin ALL channels:", self.kb(btns, 1))
     
-    def show_add_channel(self, chat_id, message_id, user_id):
-        msg = """➕ <b>Add New Channel</b>
-
-📝 <b>Send in this format:</b>
-<b>Channel Name
-Channel Username</b>
-
-📌 <b>Example:</b>
-Trade Genius Updates
-TradeGenius07
-
-⚠️ <b>Important:</b>
-• Bot must be ADMIN in the channel
-• Don't add @ before username
-• Just send the username without @"""
+    def verify(self, chat_id, msg_id, uid):
+        user = self.db.get_user(uid)
+        if self.check_channels(uid):
+            self.db.update_user(uid, {"is_verified": True})
+            if str(uid) in self.pending_refs: self.process_referral(uid, user.get("username", "User"), self.pending_refs.pop(str(uid)))
+            self.bot.edit(chat_id, msg_id, "✅ <b>Verified!</b>\n\nWelcome! Start earning now.", self.kb([("🔗 Referral", "my_referral"), ("📊 Dashboard", "dashboard"), ("🏠 Menu", "menu")]))
+        else:
+            self.bot.edit(chat_id, msg_id, "❌ <b>Failed</b>\n\nJoin ALL channels, wait 10s, try again.", self.kb([("🔄 Retry", "verify"), ("📋 Channels", "channels")]))
+    
+    def welcome(self, chat_id, uid, user):
+        if not user: user = self.db.get_user(uid)
+        if not user: return
+        admin = "\n👑 <b>Admin</b>" if str(uid) == Config.ADMIN_USER_ID else ""
+        msg = f"👋 <b>Welcome!</b> 💸{admin}\n\n💰 Earn <b>₹{Config.REWARD_PER_REFERRAL}</b>/referral\n🔗 Code: <code>{user.get('referral_code', 'N/A')}</code>\n👥 Referrals: {user.get('referrals', 0)}\n💸 Balance: ₹{user.get('pending_balance', 0)}"
+        self.bot.send(chat_id, msg, self.kb(self.menu_btns(uid)))
+    
+    def callback(self, chat_id, msg_id, uid, cb):
+        self.bot.answer(cb["id"])
+        user = self.db.get_user(uid) or {}
+        data = cb.get("data", "")
+        is_admin = str(uid) == Config.ADMIN_USER_ID
         
-        self.user_states[user_id] = {
-            "state": "awaiting_channel",
-            "chat_id": chat_id,
-            "message_id": message_id
+        if not is_admin and not user.get("is_verified") and data not in ["verify", "channels", "menu"]:
+            self.bot.edit(chat_id, msg_id, "❌ Verify first!", self.kb([("✅ VERIFY", "verify")]))
+            return
+        
+        handlers = {
+            "verify": lambda: self.verify(chat_id, msg_id, uid),
+            "channels": lambda: self.verify_screen(chat_id, uid),
+            "menu": lambda: self.show_menu(chat_id, msg_id, uid, user),
+            "my_referral": lambda: self.show_referral(chat_id, msg_id, uid, user),
+            "dashboard": lambda: self.show_dash(chat_id, msg_id, uid, user),
+            "withdraw": lambda: self.show_withdraw(chat_id, msg_id, uid, user),
+            "setup_upi": lambda: self.setup_upi(chat_id, msg_id, uid),
+            "request_wd": lambda: self.request_wd(chat_id, msg_id, uid, user),
+            "wd_history": lambda: self.show_history(chat_id, msg_id, uid),
+            "terms": lambda: self.bot.edit(chat_id, msg_id, f"📜 <b>Terms</b>\n\n1. Join channels to earn\n2. One referrer per user\n3. No self-referral\n4. Min withdraw: ₹{Config.MINIMUM_WITHDRAWAL}\n5. Fraud = Ban", self.kb([("🏠 Menu", "menu")])),
+            "how": lambda: self.bot.edit(chat_id, msg_id, f"📢 <b>How It Works</b>\n\n1️⃣ Join Channels\n2️⃣ Get Referral Link\n3️⃣ Earn ₹{Config.REWARD_PER_REFERRAL}/referral\n4️⃣ Withdraw (Min ₹{Config.MINIMUM_WITHDRAWAL})", self.kb([("🏠 Menu", "menu")])),
+            "rewards": lambda: self.bot.edit(chat_id, msg_id, f"🎁 <b>Rewards</b>\n\n💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}\n🔥 10 Referrals: +₹{Config.BONUS_AT_10_REFERRALS}", self.kb([("🏠 Menu", "menu")])),
+            "support": lambda: self.bot.edit(chat_id, msg_id, f"📞 <b>Support</b>\n\n{Config.SUPPORT_CHANNEL}", self.kb([("🏠 Menu", "menu")])),
+            "open_web": lambda: self.bot.edit(chat_id, msg_id, "🤖 <b>AI Assistant</b>\n\nTap below:", self.kb([{"text": self.db.get_setting("ai_button_name", Config.AI_BUTTON_NAME), "url": self.db.get_setting("web_url", Config.WEB_URL)}, ("🏠 Menu", "menu")])),
+            "admin": lambda: self.admin_panel(chat_id, msg_id, uid) if is_admin else None,
         }
         
-        buttons = [("❌ Cancel", "admin_channels")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+        if data in handlers: handlers[data]()
+        elif data.startswith("admin_") and is_admin: self.admin_cb(chat_id, msg_id, uid, data)
     
-    def show_channel_list(self, chat_id, message_id, user_id):
-        channels = self.db.get_channels()
-        
-        if not channels:
-            msg = "📢 <b>No Channels</b>\n\nNo channels added yet.\nUsers will NOT see verification screen."
-            buttons = [("➕ Add Channel", "admin_add_channel"), ("🔙 Back", "admin_channels")]
+    def show_menu(self, chat_id, msg_id, uid, user):
+        self.bot.edit(chat_id, msg_id, f"🏠 <b>Menu</b>\n\n💰 ₹{user.get('pending_balance', 0)} | 👥 {user.get('referrals', 0)}", self.kb(self.menu_btns(uid)))
+    
+    def show_referral(self, chat_id, msg_id, uid, user):
+        code = user.get("referral_code") or ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+        link = f"https://t.me/{Config.BOT_USERNAME}?start={code}"
+        msg = f"🔗 <b>Your Link</b>\n\n<code>{link}</code>\n\n💰 ₹{Config.REWARD_PER_REFERRAL}/referral\n👥 {user.get('referrals', 0)} referrals"
+        self.bot.edit(chat_id, msg_id, msg, self.kb([{"text": "📤 Share", "url": f"https://t.me/share/url?url={quote(link)}"}, ("📊 Dashboard", "dashboard"), ("🏠 Menu", "menu")]))
+    
+    def show_dash(self, chat_id, msg_id, uid, user):
+        msg = f"📊 <b>Dashboard</b>\n\n🔗 <code>{user.get('referral_code', 'N/A')}</code>\n📱 UPI: <code>{user.get('upi_id', 'Not set')}</code>\n\n👥 {user.get('referrals', 0)} | 💰 ₹{user.get('pending_balance', 0)} | 💸 ₹{user.get('total_earnings', 0)}"
+        self.bot.edit(chat_id, msg_id, msg, self.kb([("💳 Withdraw", "withdraw"), ("🔗 Link", "my_referral"), ("🏠 Menu", "menu")]))
+    
+    def show_withdraw(self, chat_id, msg_id, uid, user):
+        bal, upi = user.get("pending_balance", 0), user.get("upi_id", "")
+        if not upi:
+            msg = f"❌ <b>Setup UPI first</b>\n\nBalance: ₹{bal} | Min: ₹{Config.MINIMUM_WITHDRAWAL}"
+            btns = [("📱 Setup UPI", "setup_upi"), ("🏠 Menu", "menu")]
+        elif bal >= Config.MINIMUM_WITHDRAWAL:
+            msg = f"💳 <b>Withdraw</b>\n\n💰 ₹{bal} | UPI: <code>{upi}</code>"
+            btns = [("✅ Request", "request_wd"), ("✏️ Change UPI", "setup_upi"), ("📜 History", "wd_history"), ("🏠 Menu", "menu")]
         else:
-            msg = "📢 <b>Current Channels</b>\n\nUsers must join ALL these channels:\n"
-            buttons = []
-            
-            for i, (channel_id, channel) in enumerate(channels.items(), 1):
-                name = channel.get("name", "Unknown")
-                username = channel.get("username", "")
-                
-                if not username:
-                    display_link = "No username"
-                else:
-                    display_link = f"@{username}"
-                
-                msg += f"{i}. <b>{name}</b>\n   🔗 {display_link}\n\n"
-                
-                buttons.append((f"❌ Delete {i}", f"admin_delete_channel_{channel_id}"))
-            
-            buttons.append(("➕ Add More", "admin_add_channel"))
-            buttons.append(("🔙 Back", "admin_channels"))
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+            need = Config.MINIMUM_WITHDRAWAL - bal
+            msg = f"❌ <b>Need ₹{need} more</b>\n\nBalance: ₹{bal} | Min: ₹{Config.MINIMUM_WITHDRAWAL}"
+            btns = [("🔗 Referral", "my_referral"), ("📜 History", "wd_history"), ("🏠 Menu", "menu")]
+        self.bot.edit(chat_id, msg_id, msg, self.kb(btns))
     
-    def handle_user_message(self, chat_id, user_id, text):
-        if user_id in self.user_states:
-            state = self.user_states[user_id]
-            
-            if state.get("state") == "awaiting_upi":
-                upi_id = text.strip()
-                
-                if '@' in upi_id and len(upi_id) > 5:
-                    self.db.update_upi_id(user_id, upi_id)
-                    
-                    msg = f"""✅ <b>UPI ID Saved</b>
-
-📱 Your UPI ID: <code>{upi_id}</code>
-
-You can now request withdrawals."""
-                    
-                    buttons = [("💳 Withdraw", "withdraw"), ("🏠 Menu", "main_menu")]
-                    keyboard = self.generate_keyboard(buttons, 2)
-                    self.bot.send_message(chat_id, msg, keyboard)
-                    
-                    self.bot.edit_message_text(
-                        state["chat_id"],
-                        state["message_id"],
-                        "✅ UPI ID setup completed!",
-                        self.generate_keyboard([("🏠 Menu", "main_menu")], 1)
-                    )
-                    
-                    del self.user_states[user_id]
-                else:
-                    msg = "❌ Invalid UPI ID.\n\nUse: <code>username@upi</code>"
-                    self.bot.send_message(chat_id, msg)
-            
-            elif state.get("state") == "awaiting_channel":
-                lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
-                
-                if len(lines) >= 2:
-                    channel_name = lines[0]
-                    channel_username = lines[1].lower()
-                    
-                    # Clean username - remove @ if user added it
-                    if channel_username.startswith('@'):
-                        channel_username = channel_username[1:]
-                    
-                    # Remove any spaces from username
-                    channel_username = channel_username.replace(" ", "")
-                    
-                    # Validate username format
-                    if not channel_username.replace('_', '').replace('.', '').isalnum():
-                        msg = "❌ Invalid username! Use only letters, numbers, underscore."
-                        self.bot.send_message(chat_id, msg)
-                        return
-                    
-                    # Create channel link
-                    channel_link = f"@{channel_username}"
-                    
-                    # Create unique channel ID
-                    channel_id = f"channel_{channel_username}_{int(time.time())}"
-                    
-                    channel_data = {
-                        "name": channel_name,
-                        "username": channel_username,
-                        "link": channel_link,
-                        "id": channel_id,
-                        "added_by": str(user_id),
-                        "added_at": datetime.now().isoformat()
-                    }
-                    
-                    result = self.db.add_channel(channel_data)
-                    
-                    if result is not None:
-                        msg = f"""✅ <b>Channel Added Successfully!</b>
-
-📢 <b>Name:</b> {channel_name}
-🔗 <b>Username:</b> @{channel_username}
-🆔 <b>ID:</b> {channel_id}
-
-✅ Users will need to join this channel.
-✅ Bot must be admin in @{channel_username}"""
-                    else:
-                        msg = "❌ Failed to add channel. Please try again."
-                else:
-                    msg = """❌ Invalid format!
-
-Please send exactly 2 lines:
-<b>Channel Name
-Channel Username</b>
-
-Example:
-<b>Trade Genius Updates
-TradeGenius07</b>"""
-                
-                buttons = [
-                    ("📢 View All Channels", "admin_view_channels"),
-                    ("➕ Add Another", "admin_add_channel"),
-                    ("🔙 Back", "admin_channels")
-                ]
-                keyboard = self.generate_keyboard(buttons, 2)
-                self.bot.send_message(chat_id, msg, keyboard)
-                del self.user_states[user_id]
-            
-            elif state.get("state") == "awaiting_rejection_reason":
-                self.process_rejection_reason(user_id, text)
-            
-            elif state.get("state") == "awaiting_web_url":
-                new_url = text.strip()
-                
-                if new_url.startswith("http://") or new_url.startswith("https://"):
-                    result = self.db.update_web_url(new_url)
-                    
-                    if result is not None:
-                        msg = f"""✅ <b>Web URL Updated</b>
-
-New URL: <code>{new_url}</code>
-
-The AI button will now use this URL."""
-                    else:
-                        msg = "❌ Failed to update web URL."
-                else:
-                    msg = "❌ Invalid URL. Must start with http:// or https://"
-                
-                buttons = [("🌐 Back to Web URL", "admin_web_url")]
-                keyboard = self.generate_keyboard(buttons, 1)
-                self.bot.send_message(chat_id, msg, keyboard)
-                del self.user_states[user_id]
-            
-            elif state.get("state") == "awaiting_ai_button_name":
-                new_name = text.strip()
-                
-                if len(new_name) <= 20 and len(new_name) > 0:
-                    result = self.db.update_ai_button_name(new_name)
-                    
-                    if result is not None:
-                        msg = f"""✅ <b>AI Button Name Updated</b>
-
-New Name: <code>{new_name}</code>
-
-The AI button in main menu will now show this name.
-It will update for all users immediately."""
-                    else:
-                        msg = "❌ Failed to update AI button name."
-                else:
-                    msg = "❌ Invalid name. Must be 1-20 characters."
-                
-                buttons = [("🤖 Back to AI Button", "admin_ai_button")]
-                keyboard = self.generate_keyboard(buttons, 1)
-                self.bot.send_message(chat_id, msg, keyboard)
-                del self.user_states[user_id]
+    def setup_upi(self, chat_id, msg_id, uid):
+        self.states[uid] = {"state": "upi", "chat": chat_id, "msg": msg_id}
+        self.bot.edit(chat_id, msg_id, "📱 <b>Send UPI ID</b>\n\nFormat: <code>name@upi</code>", self.kb([("❌ Cancel", "withdraw")]))
+    
+    def request_wd(self, chat_id, msg_id, uid, user):
+        bal, upi = user.get("pending_balance", 0), user.get("upi_id", "")
+        if bal < Config.MINIMUM_WITHDRAWAL or not upi: self.show_withdraw(chat_id, msg_id, uid, user); return
+        wid = f"WD{random.randint(100000, 999999)}"
+        self.db.create_withdrawal(wid, {"user_id": str(uid), "username": user.get("username", ""), "amount": bal, "upi_id": upi, "status": "pending", "requested_at": datetime.now().isoformat()})
+        self.db.update_user(uid, {"pending_balance": 0, "withdrawn": user.get("withdrawn", 0) + bal})
+        self.bot.send(Config.ADMIN_USER_ID, f"🆕 <b>WITHDRAWAL</b>\n\n@{user.get('username', 'N/A')} | ₹{bal}\nUPI: <code>{upi}</code>\nID: {wid}")
+        self.bot.edit(chat_id, msg_id, f"✅ <b>Submitted</b>\n\nID: <code>{wid}</code> | ₹{bal}\nProcessed in 24-72hrs", self.kb([("📜 Status", "wd_history"), ("🏠 Menu", "menu")]))
+    
+    def show_history(self, chat_id, msg_id, uid):
+        wds = self.db.get_withdrawals()
+        user_wds = [(k, v) for k, v in wds.items() if v and v.get("user_id") == str(uid)]
+        if not user_wds: msg = "📜 <b>No withdrawals</b>"
+        else:
+            msg = "📜 <b>History</b>\n\n"
+            for wid, w in sorted(user_wds, key=lambda x: x[1].get("requested_at", ""), reverse=True)[:10]:
+                s = {"completed": "✅", "rejected": "❌"}.get(w.get("status"), "⏳")
+                msg += f"{s} ₹{w.get('amount', 0)} - {w.get('status', 'pending')}\n"
+        self.bot.edit(chat_id, msg_id, msg, self.kb([("💳 Withdraw", "withdraw"), ("🏠 Menu", "menu")]))
+    
+    def admin_panel(self, chat_id, msg_id, uid):
+        users, wds, chs = len(self.db.get_all_users()), len(self.db.get_withdrawals("pending")), len(self.db.get_channels())
+        msg = f"👑 <b>Admin</b>\n\n👥 {users} | 💳 {wds} pending | 📢 {chs} channels"
+        btns = [("📊 Stats", "admin_stats"), ("💳 Withdrawals", "admin_wds"), ("📢 Channels", "admin_chs"), ("🌐 Web URL", "admin_url"), ("🤖 AI Button", "admin_ai"), ("👥 Users", "admin_users"), ("📢 Broadcast", "admin_bc"), ("🏠 Menu", "menu")]
+        self.bot.edit(chat_id, msg_id, msg, self.kb(btns))
+    
+    def admin_cb(self, chat_id, msg_id, uid, data):
+        if data == "admin_stats":
+            users = self.db.get_all_users()
+            total = len(users); verified = sum(1 for u in users.values() if u and u.get("is_verified"))
+            earnings = sum(u.get("total_earnings", 0) for u in users.values() if u)
+            msg = f"📊 <b>Stats</b>\n\n👥 {total} users ({verified} verified)\n💰 ₹{earnings} earnings\n📢 {len(self.db.get_channels())} channels"
+            self.bot.edit(chat_id, msg_id, msg, self.kb([("🔄 Refresh", "admin_stats"), ("🔙 Back", "admin")]))
         
-        elif text.startswith("/broadcast") and str(user_id) == Config.ADMIN_USER_ID:
-            parts = text.split(maxsplit=1)
-            if len(parts) > 1:
-                message = parts[1]
-                users = self.db.get_all_users()
-                
-                if not users:
-                    self.bot.send_message(chat_id, "❌ No users.")
+        elif data == "admin_wds":
+            wds = self.db.get_withdrawals("pending")
+            if not wds: msg, btns = "💳 <b>No pending</b>", [("🔄 Refresh", "admin_wds"), ("🔙 Back", "admin")]
+            else:
+                msg, btns = "💳 <b>Pending</b>\n\n", []
+                for i, (wid, w) in enumerate(wds.items(), 1):
+                    msg += f"{i}. ₹{w.get('amount', 0)} - @{w.get('username', 'N/A')}\n   UPI: {w.get('upi_id', 'N/A')}\n\n"
+                    btns.extend([(f"✅ {i}", f"admin_approve_{wid}"), (f"❌ {i}", f"admin_reject_{wid}")])
+                btns.extend([("🔄 Refresh", "admin_wds"), ("🔙 Back", "admin")])
+            self.bot.edit(chat_id, msg_id, msg, self.kb(btns))
+        
+        elif data == "admin_chs":
+            msg = f"📢 <b>Channels</b>\n\n{len(self.db.get_channels())} added"
+            btns = [("➕ Add", "admin_add_ch"), ("👁 View", "admin_view_ch"), ("🔙 Back", "admin")]
+            self.bot.edit(chat_id, msg_id, msg, self.kb(btns))
+        
+        elif data == "admin_add_ch":
+            msg = """➕ <b>Add Channel</b>
+
+<b>PUBLIC:</b> Send 2 lines:
+Channel Name
+username
+
+<b>PRIVATE:</b> Send 3 lines:
+Channel Name
+https://t.me/+XXXXX
+-100XXXXXXXXX
+
+⚠️ For private: add chat_id (get from @userinfobot when forwarding from channel)"""
+            self.states[uid] = {"state": "channel", "chat": chat_id, "msg": msg_id}
+            self.bot.edit(chat_id, msg_id, msg, self.kb([("❌ Cancel", "admin_chs")]))
+        
+        elif data == "admin_view_ch":
+            channels = self.db.get_channels()
+            if not channels: msg, btns = "📢 <b>No channels</b>", [("➕ Add", "admin_add_ch"), ("🔙 Back", "admin_chs")]
+            else:
+                msg, btns = "📢 <b>Channels</b>\n\n", []
+                for i, (cid, ch) in enumerate(channels.items(), 1):
+                    link = ch.get("link") or f"@{ch.get('username', 'N/A')}"
+                    priv = " 🔒" if ch.get("is_private") else ""
+                    msg += f"{i}. <b>{ch.get('name', 'Unknown')}</b>{priv}\n   {link}\n\n"
+                    btns.append((f"❌ Del {i}", f"admin_del_ch_{cid}"))
+                btns.extend([("➕ Add", "admin_add_ch"), ("🔙 Back", "admin_chs")])
+            self.bot.edit(chat_id, msg_id, msg, self.kb(btns))
+        
+        elif data.startswith("admin_del_ch_"):
+            cid = data.replace("admin_del_ch_", "")
+            self.db.delete_channel(cid)
+            self.bot.edit(chat_id, msg_id, "✅ Deleted", self.kb([("📢 View", "admin_view_ch"), ("🔙 Back", "admin_chs")]))
+        
+        elif data.startswith("admin_approve_"):
+            wid = data.replace("admin_approve_", "")
+            wds = self.db.get_withdrawals()
+            if w := wds.get(wid):
+                self.db.update_withdrawal(wid, "completed", f"Approved by {uid}")
+                self.bot.send(w["user_id"], f"✅ <b>Approved!</b>\n\n₹{w['amount']} | ID: {wid}")
+                self.bot.edit(chat_id, msg_id, f"✅ Approved {wid}", self.kb([("💳 Back", "admin_wds")]))
+        
+        elif data.startswith("admin_reject_"):
+            wid = data.replace("admin_reject_", "")
+            wds = self.db.get_withdrawals()
+            if w := wds.get(wid):
+                self.states[uid] = {"state": "reject", "wid": wid, "chat": chat_id, "msg": msg_id, "user_id": w["user_id"], "amount": w["amount"]}
+                self.bot.edit(chat_id, msg_id, f"❌ <b>Reject</b>\n\n₹{w['amount']} | @{w.get('username')}\n\nSend reason:", self.kb([("❌ Cancel", "admin_wds")]))
+        
+        elif data == "admin_url":
+            url = self.db.get_setting("web_url", Config.WEB_URL)
+            self.bot.edit(chat_id, msg_id, f"🌐 <b>Web URL</b>\n\n<code>{url}</code>", self.kb([("✏️ Update", "admin_set_url"), ("🔙 Back", "admin")]))
+        
+        elif data == "admin_set_url":
+            self.states[uid] = {"state": "url", "chat": chat_id, "msg": msg_id}
+            self.bot.edit(chat_id, msg_id, "🌐 Send new URL (https://...):", self.kb([("❌ Cancel", "admin_url")]))
+        
+        elif data == "admin_ai":
+            name = self.db.get_setting("ai_button_name", Config.AI_BUTTON_NAME)
+            self.bot.edit(chat_id, msg_id, f"🤖 <b>AI Button</b>\n\n<code>{name}</code>", self.kb([("✏️ Update", "admin_set_ai"), ("🔙 Back", "admin")]))
+        
+        elif data == "admin_set_ai":
+            self.states[uid] = {"state": "ai_name", "chat": chat_id, "msg": msg_id}
+            self.bot.edit(chat_id, msg_id, "🤖 Send new name (max 20 chars):", self.kb([("❌ Cancel", "admin_ai")]))
+        
+        elif data == "admin_users":
+            users = self.db.get_all_users()
+            sorted_u = sorted([(k, v) for k, v in users.items() if v], key=lambda x: x[1].get("referrals", 0), reverse=True)[:10]
+            msg = "👥 <b>Top Users</b>\n\n"
+            for i, (uid, u) in enumerate(sorted_u, 1):
+                v = "✅" if u.get("is_verified") else "❌"
+                msg += f"{i}. {v} {u.get('username', 'User')} | ₹{u.get('total_earnings', 0)} | 👥{u.get('referrals', 0)}\n"
+            self.bot.edit(chat_id, msg_id, msg, self.kb([("🔄 Refresh", "admin_users"), ("🔙 Back", "admin")]))
+        
+        elif data == "admin_bc":
+            self.bot.edit(chat_id, msg_id, "📢 <b>Broadcast</b>\n\nUse: <code>/broadcast message</code>", self.kb([("🔙 Back", "admin")]))
+    
+    def handle_msg(self, chat_id, uid, text):
+        if uid in self.states:
+            state = self.states[uid]
+            
+            if state["state"] == "upi":
+                if '@' in text and len(text) > 5:
+                    self.db.update_user(uid, {"upi_id": text.strip()})
+                    self.bot.send(chat_id, f"✅ UPI saved: <code>{text}</code>", self.kb([("💳 Withdraw", "withdraw"), ("🏠 Menu", "menu")]))
+                else:
+                    self.bot.send(chat_id, "❌ Invalid. Use: name@upi")
                     return
-                
-                total = len(users)
-                self.bot.send_message(chat_id, f"📢 Broadcasting to {total} users...")
-                
-                success = 0
-                for uid in users.keys():
-                    try:
-                        self.bot.send_message(uid, f"📢 <b>Announcement</b>\n\n{message}")
-                        success += 1
-                        time.sleep(0.1)
-                    except:
-                        continue
-                
-                self.bot.send_message(chat_id, f"✅ Sent: {success}/{total} users")
-    
-    def show_ai_button_management(self, chat_id, message_id, user_id):
-        ai_button_name = self.db.get_ai_button_name()
-        web_url = self.db.get_web_url()
-        
-        msg = f"""🤖 <b>AI Button Management</b>
-
-Current AI Button Name:
-<code>{ai_button_name}</code>
-
-Current Web URL:
-<code>{web_url}</code>
-
-Click below to update AI button name."""
-        
-        buttons = [
-            ("✏️ Update Button Name", "admin_update_ai_button"),
-            ("🌐 Update Web URL", "admin_update_web_url"),
-            ("🔙 Back", "admin_panel")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_update_ai_button(self, chat_id, message_id, user_id):
-        current_name = self.db.get_ai_button_name()
-        
-        msg = f"""✏️ <b>Update AI Button Name</b>
-
-Current: <code>{current_name}</code>
-
-Send new AI button name:
-Example: <code>🤖 AI Chat</code> or <code>🚀 Open AI</code>
-
-⚠️ Max 20 characters, include emoji for better look."""
-        
-        self.user_states[user_id] = {
-            "state": "awaiting_ai_button_name",
-            "chat_id": chat_id,
-            "message_id": message_id
-        }
-        
-        buttons = [("❌ Cancel", "admin_ai_button")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_web_url_management(self, chat_id, message_id, user_id):
-        web_url = self.db.get_web_url()
-        
-        msg = f"""🌐 <b>Web URL Management</b>
-
-Current Web URL:
-<code>{web_url}</code>
-
-Click below to update the web URL."""
-        
-        buttons = [
-            ("✏️ Update Web URL", "admin_update_web_url"),
-            ("🔙 Back", "admin_panel")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_update_web_url(self, chat_id, message_id, user_id):
-        current_url = self.db.get_web_url()
-        
-        msg = f"""✏️ <b>Update Web URL</b>
-
-Current: <code>{current_url}</code>
-
-Send new web URL:
-Example: <code>https://example.com</code>
-
-⚠️ Must start with https://"""
-        
-        self.user_states[user_id] = {
-            "state": "awaiting_web_url",
-            "chat_id": chat_id,
-            "message_id": message_id
-        }
-        
-        buttons = [("❌ Cancel", "admin_web_url")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_admin_stats(self, chat_id, message_id, user_id):
-        users = self.db.get_all_users()
-        
-        total_users = len(users) if users else 0
-        verified = sum(1 for u in users.values() if u and u.get("is_verified", False))
-        total_earnings = sum(u.get("total_earnings", 0) for u in users.values() if u)
-        
-        channels = self.db.get_channels()
-        total_channels = len(channels) if channels else 0
-        
-        web_url = self.db.get_web_url()
-        ai_button_name = self.db.get_ai_button_name()
-        
-        # 🆕 NEW: Referral stats
-        successful_referrals = self.db.get_successful_referrals(user_id)
-        total_referral_earnings = sum(r.get("reward_amount", 0) for r in successful_referrals)
-        
-        msg = f"""📊 <b>Admin Statistics</b>
-
-👥 <b>Users:</b>
-• Total: {total_users}
-• Verified: {verified}
-• Pending Verification: {total_users - verified}
-
-💰 <b>Financial:</b>
-• Total Earnings: ₹{total_earnings}
-• Referral Earnings: ₹{total_referral_earnings}
-• Per Referral: ₹{Config.REWARD_PER_REFERRAL}
-• Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}
-
-📢 <b>Channels:</b>
-• Total: {total_channels}
-• Verification: {'Required' if total_channels > 0 else 'Not Required'}
-
-🌐 <b>Web URL:</b>
-• {web_url}
-
-🤖 <b>AI Button:</b>
-• {ai_button_name}"""
-        
-        buttons = [("🔄 Refresh", "admin_stats"), ("🔙 Back", "admin_panel")]
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_withdrawal_management(self, chat_id, message_id, user_id):
-        withdrawals = self.db.get_withdrawals("pending")
-        
-        if not withdrawals:
-            msg = "💳 <b>Pending Withdrawals</b>\n\nNo pending requests."
-            buttons = [("🔄 Refresh", "admin_withdrawals"), ("🔙 Back", "admin_panel")]
-        else:
-            msg = "💳 <b>Pending Withdrawals</b>\n\n"
-            buttons = []
+                del self.states[uid]
             
-            for i, (wd_id, wd_data) in enumerate(withdrawals.items(), 1):
-                if wd_data:
-                    username = wd_data.get("username", "N/A")
-                    amount = wd_data.get("amount", 0)
-                    upi_id = wd_data.get("upi_id", "N/A")
-                    date = datetime.fromisoformat(wd_data["requested_at"]).strftime("%d/%m %H:%M")
+            elif state["state"] == "channel":
+                lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
+                if len(lines) >= 2:
+                    name, second = lines[0], lines[1]
+                    is_private = "t.me/+" in second or second.startswith("-100")
                     
-                    msg += f"{i}. ₹{amount} - @{username}\n"
-                    msg += f"   📱 UPI: {upi_id}\n"
-                    msg += f"   📅 {date}\n\n"
+                    if is_private:
+                        # Private channel
+                        link = second if "t.me" in second else None
+                        chat_id_num = lines[2] if len(lines) >= 3 else (second if second.startswith("-100") else None)
+                        
+                        if not chat_id_num or not chat_id_num.startswith("-100"):
+                            self.bot.send(chat_id, "❌ For private channels, provide chat_id (-100XXX)\n\nFormat:\nName\nhttps://t.me/+XXX\n-100XXXXXXXXX")
+                            return
+                        
+                        cid = f"private_{int(time.time())}"
+                        ch_data = {"name": name, "link": link or f"Private ({chat_id_num})", "chat_id": chat_id_num, 
+                                   "is_private": True, "id": cid, "added_at": datetime.now().isoformat()}
+                    else:
+                        # Public channel
+                        username = second.replace("@", "").replace("https://t.me/", "").replace(" ", "").lower()
+                        cid = f"channel_{username}_{int(time.time())}"
+                        ch_data = {"name": name, "username": username, "link": f"https://t.me/{username}",
+                                   "is_private": False, "id": cid, "added_at": datetime.now().isoformat()}
                     
-                    buttons.append((f"✅ Approve {i}", f"admin_approve_{wd_id}"))
-                    buttons.append((f"❌ Reject {i}", f"admin_reject_{wd_id}"))
+                    if self.db.add_channel(ch_data) is not None:
+                        priv_text = " (Private)" if is_private else ""
+                        self.bot.send(chat_id, f"✅ <b>Added{priv_text}!</b>\n\n{name}", self.kb([("📢 View", "admin_view_ch"), ("➕ Add More", "admin_add_ch"), ("🔙 Back", "admin_chs")]))
+                    else:
+                        self.bot.send(chat_id, "❌ Failed")
+                else:
+                    self.bot.send(chat_id, "❌ Invalid format")
+                del self.states[uid]
             
-            buttons.append(("🔄 Refresh", "admin_withdrawals"))
-            buttons.append(("🔙 Back", "admin_panel"))
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_channel_management(self, chat_id, message_id, user_id):
-        channels = self.db.get_channels()
-        
-        if not channels:
-            msg = """📢 <b>Channel Management</b>
-
-No channels added yet.
-Users will NOT see verification screen.
-
-Add channels to require users to join before using bot."""
-        else:
-            msg = f"""📢 <b>Channel Management</b>
-
-{len(channels)} channel(s) added.
-Users MUST join these channels to use bot.
-
-Add more or delete existing channels."""
-        
-        buttons = [
-            ("➕ Add Channel", "admin_add_channel"),
-            ("👁 View Channels", "admin_view_channels"),
-            ("🔙 Back", "admin_panel")
-        ]
-        
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def delete_channel(self, chat_id, message_id, user_id, channel_id):
-        result = self.db.delete_channel(channel_id)
-        
-        if result is not None:
-            msg = "✅ Channel deleted successfully."
-        else:
-            msg = "❌ Failed to delete channel."
-        
-        buttons = [("📢 View Channels", "admin_view_channels"), ("🔙 Back", "admin_channels")]
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def approve_withdrawal(self, chat_id, message_id, user_id, withdrawal_id):
-        withdrawals = self.db.get_withdrawals()
-        wd_data = withdrawals.get(withdrawal_id) if withdrawals else None
-        
-        if not wd_data:
-            msg = f"❌ Withdrawal {withdrawal_id} not found."
-        else:
-            self.db.update_withdrawal_status(withdrawal_id, "completed", f"Approved by admin {user_id}")
+            elif state["state"] == "reject":
+                wid, user_id, amount = state["wid"], state["user_id"], state["amount"]
+                self.db.update_withdrawal(wid, "rejected", text)
+                user = self.db.get_user(user_id)
+                if user: self.db.update_user(user_id, {"pending_balance": user.get("pending_balance", 0) + amount})
+                self.bot.send(user_id, f"❌ <b>Rejected</b>\n\n₹{amount} returned\nReason: {text}")
+                self.bot.send(chat_id, f"❌ Rejected {wid}", self.kb([("💳 Back", "admin_wds")]))
+                del self.states[uid]
             
-            user_msg = f"""✅ <b>Withdrawal Approved!</b>
-
-💰 Amount: <b>₹{wd_data['amount']}</b>
-📋 ID: <code>{withdrawal_id}</code>
-📱 UPI: <code>{wd_data.get('upi_id', 'N/A')}</code>
-
-Payment processed successfully! Funds will reach you within 24 hours."""
+            elif state["state"] == "url":
+                if text.startswith("http"):
+                    self.db.set_setting("web_url", text.strip())
+                    self.bot.send(chat_id, f"✅ URL updated", self.kb([("🔙 Back", "admin_url")]))
+                else:
+                    self.bot.send(chat_id, "❌ Invalid URL")
+                del self.states[uid]
             
-            self.bot.send_message(wd_data["user_id"], user_msg)
-            msg = f"✅ Withdrawal {withdrawal_id} approved.\n\nUser notified."
+            elif state["state"] == "ai_name":
+                if 0 < len(text) <= 20:
+                    self.db.set_setting("ai_button_name", text.strip())
+                    self.bot.send(chat_id, f"✅ Updated: {text}", self.kb([("🔙 Back", "admin_ai")]))
+                else:
+                    self.bot.send(chat_id, "❌ 1-20 chars only")
+                del self.states[uid]
         
-        buttons = [("💳 Back to Withdrawals", "admin_withdrawals")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
+        elif text.startswith("/broadcast") and str(uid) == Config.ADMIN_USER_ID:
+            msg = text.split(maxsplit=1)[1] if len(text.split()) > 1 else None
+            if msg:
+                users = self.db.get_all_users()
+                self.bot.send(chat_id, f"📢 Sending to {len(users)}...")
+                success = sum(1 for u in users if self.bot.send(u, f"📢 <b>Announcement</b>\n\n{msg}") and not time.sleep(0.1))
+                self.bot.send(chat_id, f"✅ Sent: {success}/{len(users)}")
     
-    def reject_withdrawal(self, chat_id, message_id, user_id, withdrawal_id):
-        withdrawals = self.db.get_withdrawals()
-        wd_data = withdrawals.get(withdrawal_id) if withdrawals else None
-        
-        if not wd_data:
-            msg = f"❌ Withdrawal {withdrawal_id} not found."
-            buttons = [("💳 Back to Withdrawals", "admin_withdrawals")]
-            keyboard = self.generate_keyboard(buttons, 1)
-            self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-            return
-        
-        self.user_states[user_id] = {
-            "state": "awaiting_rejection_reason",
-            "withdrawal_id": withdrawal_id,
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "user_id": wd_data.get("user_id"),
-            "amount": wd_data.get("amount", 0)
-        }
-        
-        msg = f"""❌ <b>Reject Withdrawal</b>
-
-🆔 {withdrawal_id}
-👤 User: @{wd_data.get('username', 'N/A')}
-💰 Amount: ₹{wd_data.get('amount', 0)}
-📱 UPI: {wd_data.get('upi_id', 'N/A')}
-📞 Phone: {wd_data.get('phone', 'N/A')}
-
-Send rejection reason:"""
-        
-        buttons = [("❌ Cancel", "admin_withdrawals")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def process_rejection_reason(self, admin_id, reason):
-        if admin_id not in self.user_states:
-            return
-        
-        state = self.user_states[admin_id]
-        if state.get("state") != "awaiting_rejection_reason":
-            return
-        
-        withdrawal_id = state["withdrawal_id"]
-        user_id = state["user_id"]
-        amount = state["amount"]
-        
-        self.db.update_withdrawal_status(withdrawal_id, "rejected", f"Rejected: {reason}")
-        
-        user = self.db.get_user(user_id)
-        if user:
-            new_balance = user.get("pending_balance", 0) + amount
-            self.db.update_user(user_id, {"pending_balance": new_balance})
-        
-        user_msg = f"""❌ <b>Withdrawal Rejected</b>
-
-💰 Amount: <b>₹{amount}</b>
-📋 ID: <code>{withdrawal_id}</code>
-📝 Reason: {reason}
-
-Amount returned to your balance.
-Contact support if you have questions."""
-        
-        self.bot.send_message(user_id, user_msg)
-        
-        msg = f"""❌ <b>Withdrawal Rejected</b>
-
-🆔 {withdrawal_id}
-👤 User notified
-💰 ₹{amount} returned
-📝 Reason: {reason}"""
-        
-        buttons = [("💳 Back to Withdrawals", "admin_withdrawals")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        
-        self.bot.edit_message_text(
-            state["chat_id"], 
-            state["message_id"], 
-            msg, 
-            keyboard
-        )
-        
-        del self.user_states[admin_id]
-    
-    def show_user_management(self, chat_id, message_id, user_id):
-        users = self.db.get_all_users()
-        
-        if not users:
-            msg = "👥 <b>No Users</b>\n\nNo users yet."
-        else:
-            msg = "👥 <b>Top 10 Users by Referrals</b>\n\n"
-            
-            sorted_users = sorted(
-                [(uid, data) for uid, data in users.items() if data],
-                key=lambda x: x[1].get("referrals", 0),
-                reverse=True
-            )[:10]
-            
-            for i, (uid, data) in enumerate(sorted_users, 1):
-                username = data.get("username", f"User_{uid[-6:]}")
-                earnings = data.get("total_earnings", 0)
-                referrals = data.get("referrals", 0)
-                verified = "✅" if data.get("is_verified") else "❌"
-                
-                msg += f"{i}. {verified} {username}\n   💰 ₹{earnings} | 👥 {referrals}\n"
-        
-        buttons = [("🔄 Refresh", "admin_users"), ("🔙 Back", "admin_panel")]
-        keyboard = self.generate_keyboard(buttons, 2)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def show_broadcast_menu(self, chat_id, message_id, user_id):
-        msg = """📢 <b>Broadcast Message</b>
-
-Use /broadcast command:
-
-<code>/broadcast Your message here</code>
-
-Example:
-<code>/broadcast New update available!</code>"""
-        
-        buttons = [("🔙 Back", "admin_panel")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def handle_info_callback(self, chat_id, message_id, user_id, callback):
-        if callback == "how_it_works":
-            msg = f"""📢 <b>How It Works</b>
-
-1️⃣ <b>Join Channels</b> (If Required)
-   Complete verification first
-
-2️⃣ <b>Get Referral Link</b>
-   Share with friends
-
-3️⃣ <b>Earn Money</b>
-   Get ₹{Config.REWARD_PER_REFERRAL} per referral
-
-4️⃣ <b>Setup UPI & Withdraw</b>
-   Minimum ₹{Config.MINIMUM_WITHDRAWAL} to withdraw"""
-        
-        elif callback == "rewards":
-            msg = f"""🎁 <b>Rewards System</b>
-
-💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}
-🔥 10 Referrals Bonus: +₹{Config.BONUS_AT_10_REFERRALS}
-👑 Top Referrer: Special Reward
-
-📊 Example Earnings:
-• 5 referrals = ₹{Config.REWARD_PER_REFERRAL * 5}
-• 10 referrals = ₹{Config.REWARD_PER_REFERRAL * 10 + Config.BONUS_AT_10_REFERRALS}
-• 20 referrals = ₹{Config.REWARD_PER_REFERRAL * 20 + (Config.BONUS_AT_10_REFERRALS * 2)}"""
-        
-        elif callback == "support":
-            msg = f"""📞 <b>Support</b>
-
-Channel: {Config.SUPPORT_CHANNEL}
-
-We're here to help!"""
-        
-        buttons = [("🏠 Main Menu", "main_menu")]
-        keyboard = self.generate_keyboard(buttons, 1)
-        self.bot.edit_message_text(chat_id, message_id, msg, keyboard)
-    
-    def run_bot(self):
-        print("🤖 Trade Genius Bot Started!")
-        print(f"👑 Admin ID: {Config.ADMIN_USER_ID}")
-        
-        print("🔄 Disabling webhook...")
-        webhook_info = self.bot._api_request("getWebhookInfo")
-        if webhook_info:
-            print(f"ℹ️ Current webhook: {webhook_info.get('url', 'None')}")
-        
-        delete_result = self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
-        if delete_result:
-            print("✅ Webhook disabled successfully")
-        else:
-            print("⚠️ Could not disable webhook, trying again...")
-            self.bot._api_request("deleteWebhook", {})
-        
+    def run(self):
+        print("🤖 Bot Started!")
+        self.bot.api("deleteWebhook", {"drop_pending_updates": True})
         time.sleep(2)
+        print(f"💰 ₹{Config.REWARD_PER_REFERRAL}/referral | Min: ₹{Config.MINIMUM_WITHDRAWAL}")
+        print("✅ Private channel support added")
+        print("=" * 40)
         
-        webhook_info = self.bot._api_request("getWebhookInfo")
-        if webhook_info and webhook_info.get("url"):
-            print(f"⚠️ Webhook still active: {webhook_info.get('url')}")
-            self.bot._api_request("deleteWebhook", {})
-        else:
-            print("✅ Webhook confirmed disabled")
-        
-        web_url = self.db.get_web_url()
-        ai_button_name = self.db.get_ai_button_name()
-        
-        print(f"💰 Per Referral: ₹{Config.REWARD_PER_REFERRAL}")
-        print(f"💰 Min Withdrawal: ₹{Config.MINIMUM_WITHDRAWAL}")
-        print(f"🌐 Web URL: {web_url}")
-        print(f"🤖 AI Button Name: {ai_button_name}")
-        print("✅ FIXED: Referral System Issues")
-        print("✅ ADDED: Anonymous User Support")
-        print("✅ FIXED: Channel Verification Timing")
-        print("✅ SIMPLIFIED: Channel Add (Only Name & Username)")
-        print("="*50)
-        
-        self.offset = 0
-        error_count = 0
-        
+        errors = 0
         while self.running:
             try:
-                updates = self.bot.get_updates(self.offset)
+                updates = self.bot.updates(self.offset)
+                if updates is None: errors += 1; time.sleep(2 if errors <= 5 else 5); continue
+                errors = 0
                 
-                if updates is None:
-                    error_count += 1
-                    if error_count > 5:
-                        print("🔄 Too many errors, re-initializing bot...")
-                        self.bot._api_request("deleteWebhook", {"drop_pending_updates": True})
-                        error_count = 0
-                        time.sleep(5)
-                    else:
-                        time.sleep(2)
-                    continue
-                
-                error_count = 0
-                
-                if updates and isinstance(updates, list):
-                    for update in updates:
-                        self.offset = update["update_id"] + 1
-                        
-                        if "message" in update:
-                            msg = update["message"]
-                            chat_id = msg["chat"]["id"]
-                            user_id = msg["from"]["id"]
-                            username = msg["from"].get("username", "")
-                            first_name = msg["from"].get("first_name", "")
-                            last_name = msg["from"].get("last_name", "")
-                            
-                            if "text" in msg:
-                                text = msg["text"]
-                                
-                                if text.startswith("/start"):
-                                    parts = text.split()
-                                    args = parts[1:] if len(parts) > 1 else []
-                                    self.start_command(chat_id, user_id, username, first_name, last_name, args)
-                                
-                                elif text.startswith("/admin") and str(user_id) == Config.ADMIN_USER_ID:
-                                    self.show_admin_panel(chat_id, msg["message_id"], user_id)
-                                
-                                else:
-                                    self.handle_user_message(chat_id, user_id, text)
-                        
-                        elif "callback_query" in update:
-                            cb = update["callback_query"]
-                            chat_id = cb["message"]["chat"]["id"]
-                            message_id = cb["message"]["message_id"]
-                            user_id = cb["from"]["id"]
-                            
-                            self.handle_callback(chat_id, message_id, user_id, cb)
+                for upd in updates:
+                    self.offset = upd["update_id"] + 1
+                    if "message" in upd:
+                        m = upd["message"]
+                        cid, uid = m["chat"]["id"], m["from"]["id"]
+                        if "text" in m:
+                            txt = m["text"]
+                            if txt.startswith("/start"):
+                                args = txt.split()[1:] if len(txt.split()) > 1 else []
+                                self.start(cid, uid, m["from"].get("username", ""), m["from"].get("first_name", ""), m["from"].get("last_name", ""), args)
+                            elif txt.startswith("/admin") and str(uid) == Config.ADMIN_USER_ID:
+                                self.admin_panel(cid, m["message_id"], uid)
+                            else:
+                                self.handle_msg(cid, uid, txt)
+                    elif "callback_query" in upd:
+                        cb = upd["callback_query"]
+                        self.callback(cb["message"]["chat"]["id"], cb["message"]["message_id"], cb["from"]["id"], cb)
                 
                 time.sleep(0.5)
-                
             except KeyboardInterrupt:
-                print("\n🛑 Bot stopped by user")
                 self.running = False
-                
             except Exception as e:
-                print(f"❌ Unexpected Error: {e}")
-                error_count += 1
-                if error_count > 10:
-                    print("🔴 Too many errors, restarting bot...")
-                    time.sleep(10)
-                    self.offset = 0
-                    error_count = 0
-                else:
-                    time.sleep(5)
+                print(f"❌ Error: {e}")
+                errors += 1
+                if errors > 10: time.sleep(10); self.offset = 0; errors = 0
+                else: time.sleep(5)
 
-# ==================== START BOTH SERVERS ====================
-def run_both():
-    bot = TradeGeniusBot()
-    
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    
-    print("🌐 Flask server started on port 5000")
-    print("🤖 Starting Telegram bot...")
-    
-    bot.run_bot()
-
-# ==================== START BOT ====================
 if __name__ == "__main__":
-    print("🔥 Trade Genius Bot - Fixed Referral System")
-    print("="*50)
-    
-    if Config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ Configure bot token first!")
-    else:
-        run_both()
+    print("🔥 Trade Genius Bot - Optimized")
+    print("=" * 40)
+    threading.Thread(target=run_flask, daemon=True).start()
+    print("🌐 Flask started")
+    TradeGeniusBot().run()
