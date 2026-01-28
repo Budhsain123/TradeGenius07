@@ -1,12 +1,14 @@
+Flask
+gunicorn
 requests
 httpx
 google
 protobuf
+protobuf-decoder
 pycryptodome
 psutil
 PyJWT
 urllib3
-protobuf-decoder
 pytz
 aiohttp
 cfonts
